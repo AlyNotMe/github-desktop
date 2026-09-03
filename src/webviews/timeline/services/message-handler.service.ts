@@ -36,6 +36,18 @@ export class MessageHandlerService {
       case "commit":
         await this.handleCommit(message.message);
         break;
+      case "commitFiles":
+        await this.handleCommitFiles(
+          (message as any).message,
+          (message as any).files,
+        );
+        break;
+      case "discardFiles":
+        await this.handleDiscardFiles((message as any).files);
+        break;
+      case "getWorkingDiff":
+        await this.handleGetWorkingDiff((message as any).filePath);
+        break;
       case "push":
         await this.handlePush();
         break;
@@ -340,6 +352,76 @@ export class MessageHandlerService {
       vscode.window.showInformationMessage("Commit created successfully");
     } catch (error) {
       vscode.window.showErrorMessage(`Failed to commit: ${error}`);
+    }
+  }
+
+  // Commit exactly the given paths (GitHub Desktop model: checked files are the
+  // commit, no separate staging step). Stages then commits with a pathspec.
+  private async handleCommitFiles(
+    message: string,
+    files: string[],
+  ): Promise<void> {
+    const repository = getPrimaryRepository(this.repositories);
+    if (!repository || !message?.trim() || !files?.length) return;
+
+    try {
+      const git = simpleGit(repository.localPath);
+      await git.add(files);
+      await git.commit(message, files);
+      await this.handleRefresh();
+      vscode.window.showInformationMessage("Commit created successfully");
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to commit: ${error}`);
+    }
+  }
+
+  private async handleDiscardFiles(files: string[]): Promise<void> {
+    const repository = getPrimaryRepository(this.repositories);
+    if (!repository || !files?.length) return;
+
+    const confirm = await vscode.window.showWarningMessage(
+      files.length === 1
+        ? `Discard changes to ${files[0]}?`
+        : `Discard changes to ${files.length} files?`,
+      { modal: true },
+      "Discard",
+    );
+    if (confirm !== "Discard") return;
+
+    try {
+      const git = simpleGit(repository.localPath);
+      await git.raw(["checkout", "HEAD", "--", ...files]).catch(() => undefined);
+      await git.raw(["clean", "-fd", "--", ...files]).catch(() => undefined);
+      await this.handleRefresh();
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to discard: ${error}`);
+    }
+  }
+
+  // Diff of an uncommitted working-tree change (staged + unstaged, plus new files).
+  private async handleGetWorkingDiff(filePath: string): Promise<void> {
+    const repository = getPrimaryRepository(this.repositories);
+    if (!repository) return;
+
+    try {
+      const git = simpleGit(repository.localPath);
+      let diff = await git.raw(["diff", "HEAD", "--", filePath]);
+      if (!diff.trim()) {
+        // Untracked file: show it as an addition.
+        diff = await git
+          .raw(["diff", "--no-index", "--", "/dev/null", filePath])
+          .catch(() => "");
+      }
+      this.view.webview.postMessage({
+        type: "workingDiff",
+        payload: { path: filePath, diff },
+      });
+    } catch (error) {
+      this.view.webview.postMessage({
+        type: "error",
+        message:
+          error instanceof Error ? error.message : "Failed to load file diff.",
+      });
     }
   }
 
