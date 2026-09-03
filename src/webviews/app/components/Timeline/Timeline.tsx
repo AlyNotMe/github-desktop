@@ -65,12 +65,12 @@ export const Timeline: React.FC<TimelineProps> = ({
       />
 
       {/* Tabs */}
-      {/* <TimelineTabs
+      <TimelineTabs
         activeTab={state.activeTab}
         changes={changes}
         history={history}
         onTabChange={actions.setActiveTab}
-      /> */}
+      />
 
       {/* Content */}
       <Box sx={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>

@@ -11,7 +11,7 @@ export const useTimelineState = (
   history: GitCommit[],
   commitsOffset: number,
 ) => {
-  const [activeTab, setActiveTab] = useState<TabType>("history");
+  const [activeTab, setActiveTab] = useState<TabType>("changes");
   const [commitMessage, setCommitMessage] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
