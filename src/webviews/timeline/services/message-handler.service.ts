@@ -305,6 +305,18 @@ export class MessageHandlerService {
         repository: data.repository,
       });
 
+      const active = this.accounts.getActiveAccount();
+      this.view.webview.postMessage({
+        command: "updateAccounts",
+        activeAccount: active
+          ? {
+              login: active.login,
+              name: active.name,
+              avatarUrl: active.avatarUrl,
+            }
+          : null,
+      });
+
       this.view.webview.postMessage({
         command: "updateRemoteStatus",
         remoteStatus: data.remoteStatus,

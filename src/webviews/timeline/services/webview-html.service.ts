@@ -225,7 +225,7 @@ button, input, textarea { font: inherit; color: inherit; }
   font-size: 11px; padding: 0 5px; border-radius: 8px;
   background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
 }
-.tabpane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.tabpane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
 
 /* ---- changed files ---- */
 #filterWrap { flex: 0 0 auto; padding: 8px; }
@@ -240,7 +240,7 @@ button, input, textarea { font: inherit; color: inherit; }
   padding: 5px 10px; font-size: 12px; color: var(--vscode-descriptionForeground);
   border-bottom: 1px solid var(--vscode-panel-border); cursor: pointer;
 }
-#fileList { flex: 1 1 auto; overflow: auto; min-height: 0; }
+#fileList { flex: 1 1 auto; overflow: auto; min-height: 84px; }
 .file-row {
   display: flex; align-items: center; gap: 8px; padding: 3px 10px; cursor: pointer;
   white-space: nowrap;
@@ -271,21 +271,23 @@ button, input, textarea { font: inherit; color: inherit; }
 #commitBox {
   flex: 0 0 auto; padding: 8px; border-top: 1px solid var(--vscode-panel-border);
   display: flex; flex-direction: column; gap: 6px;
+  background: var(--vscode-sideBar-background); position: sticky; bottom: 0;
 }
 .commit-summary { display: flex; align-items: center; gap: 6px; }
 .avatar {
-  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 700; text-transform: uppercase;
   background: var(--vscode-button-background); color: var(--vscode-button-foreground);
 }
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 #summary, #description {
   width: 100%; padding: 5px 8px; border-radius: 2px;
   background: var(--vscode-input-background); color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, transparent);
 }
 #summary:focus, #description:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
-#description { resize: vertical; min-height: 48px; max-height: 140px; }
+#description { resize: vertical; min-height: 34px; max-height: 140px; }
 #commitBtn {
   width: 100%; padding: 6px 10px; border: 0; border-radius: 2px; cursor: pointer;
   background: var(--vscode-button-background); color: var(--vscode-button-foreground);
@@ -375,6 +377,7 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => (
 
 const state = {
   repository: (window.__INITIAL__ && window.__INITIAL__.repository) || null,
+  account: null,
   changes: [],
   history: [],
   branches: [],
@@ -660,10 +663,17 @@ window.addEventListener("message", (ev) => {
   const msg = ev.data || {};
   switch (msg.command || msg.type) {
     case "updateChanges": {
+      const prevPaths = new Set(state.changes.map((c) => c.path));
       state.changes = msg.changes || [];
       const paths = new Set(state.changes.map((c) => c.path));
-      if (state.selectedFiles.size === 0) state.changes.forEach((c) => state.selectedFiles.add(c.path));
-      else state.selectedFiles = new Set(Array.from(state.selectedFiles).filter((p) => paths.has(p)));
+      // Auto-check newly appeared files (GitHub Desktop checks everything by default),
+      // keep the user's choices for files that were already listed.
+      state.selectedFiles = new Set(
+        Array.from(state.selectedFiles).filter((p) => paths.has(p)),
+      );
+      state.changes.forEach((c) => {
+        if (!prevPaths.has(c.path)) state.selectedFiles.add(c.path);
+      });
       if (state.selectedPath && !paths.has(state.selectedPath)) {
         state.selectedPath = null;
         $("diffHeader").hidden = true;
@@ -686,6 +696,10 @@ window.addEventListener("message", (ev) => {
       state.repository = msg.repository || null;
       renderToolbar(); setAvatar();
       break;
+    case "updateAccounts":
+      state.account = msg.activeAccount || null;
+      setAvatar();
+      break;
     case "updateRemoteStatus":
       state.remote = msg.remoteStatus || null;
       renderToolbar();
@@ -704,8 +718,16 @@ window.addEventListener("message", (ev) => {
 
 /* ---------- avatar ---------- */
 function setAvatar() {
-  const s = (state.repository && state.repository.name) || "?";
-  $("avatar").textContent = s.slice(0, 2);
+  const a = state.account;
+  const el = $("avatar");
+  if (a && a.avatarUrl) {
+    el.innerHTML = '<img alt="" src="' + esc(a.avatarUrl) + '">';
+    el.title = a.login || "";
+    return;
+  }
+  const s = (a && (a.name || a.login)) || (state.repository && state.repository.name) || "?";
+  el.textContent = s.slice(0, 2);
+  el.title = (a && a.login) || "";
 }
 setAvatar();
 renderToolbar();
