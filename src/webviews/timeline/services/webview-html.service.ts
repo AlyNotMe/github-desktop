@@ -178,13 +178,13 @@ button, input, textarea { font: inherit; color: inherit; }
 
 /* ---- toolbar ---- */
 #toolbar {
-  display: flex; flex: 0 0 auto; height: 50px;
+  display: flex; flex: 0 0 auto; height: 42px;
   background: var(--vscode-sideBar-background);
   border-bottom: 1px solid var(--vscode-panel-border);
 }
 .cell {
-  display: flex; align-items: center; gap: 8px;
-  flex: 1 1 0; min-width: 0; padding: 0 12px;
+  display: flex; align-items: center; gap: 7px;
+  flex: 1 1 0; min-width: 0; padding: 0 10px;
   background: transparent; border: 0;
   border-right: 1px solid var(--vscode-panel-border);
   cursor: pointer; text-align: left;
@@ -193,9 +193,9 @@ button, input, textarea { font: inherit; color: inherit; }
 .cell:hover { background: var(--vscode-list-hoverBackground); }
 .cell-ico { flex: 0 0 auto; display: flex; opacity: .8; }
 .cell-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
-.cell-label { font-size: 11px; color: var(--vscode-descriptionForeground); }
-.cell-value { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cell-sub { font-weight: 400; font-size: 11px; color: var(--vscode-descriptionForeground); }
+.cell-label { font-size: 10px; color: var(--vscode-descriptionForeground); }
+.cell-value { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cell-sub { font-weight: 400; font-size: 10px; color: var(--vscode-descriptionForeground); }
 .cell-caret { flex: 0 0 auto; opacity: .6; }
 .cell-count {
   flex: 0 0 auto; font-size: 11px; padding: 1px 5px; border-radius: 8px;
@@ -215,34 +215,34 @@ button, input, textarea { font: inherit; color: inherit; }
 /* ---- tabs ---- */
 #tabs { display: flex; flex: 0 0 auto; border-bottom: 1px solid var(--vscode-panel-border); }
 .tab {
-  flex: 1 1 0; padding: 8px 4px; background: transparent; border: 0;
-  border-bottom: 2px solid transparent; cursor: pointer;
+  flex: 1 1 0; padding: 5px 4px; background: transparent; border: 0;
+  border-bottom: 2px solid transparent; cursor: pointer; font-size: 12px;
   color: var(--vscode-descriptionForeground); font-weight: 500;
 }
 .tab:hover { background: var(--vscode-list-hoverBackground); }
 .tab.is-active { color: var(--vscode-foreground); border-bottom-color: var(--vscode-focusBorder); }
 .badge {
-  font-size: 11px; padding: 0 5px; border-radius: 8px;
+  font-size: 10px; padding: 0 5px; border-radius: 8px;
   background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
 }
-.tabpane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.tabpane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
 /* ---- changed files ---- */
-#filterWrap { flex: 0 0 auto; padding: 8px; }
+#filterWrap { flex: 0 0 auto; padding: 6px; }
 #filter {
-  width: 100%; padding: 4px 8px; border-radius: 2px;
+  width: 100%; padding: 3px 7px; border-radius: 2px; font-size: 12px;
   background: var(--vscode-input-background); color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, transparent);
 }
 #filter:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
 #allRow {
-  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
-  padding: 5px 10px; font-size: 12px; color: var(--vscode-descriptionForeground);
+  flex: 0 0 auto; display: flex; align-items: center; gap: 7px;
+  padding: 3px 8px; font-size: 11px; color: var(--vscode-descriptionForeground);
   border-bottom: 1px solid var(--vscode-panel-border); cursor: pointer;
 }
-#fileList { flex: 1 1 auto; overflow: auto; min-height: 84px; }
+#fileList { flex: 1 1 0; overflow: auto; min-height: 44px; }
 .file-row {
-  display: flex; align-items: center; gap: 8px; padding: 3px 10px; cursor: pointer;
+  display: flex; align-items: center; gap: 7px; padding: 2px 8px; cursor: pointer;
   white-space: nowrap;
 }
 .file-row:hover { background: var(--vscode-list-hoverBackground); }
@@ -269,27 +269,27 @@ button, input, textarea { font: inherit; color: inherit; }
 
 /* ---- commit box ---- */
 #commitBox {
-  flex: 0 0 auto; padding: 8px; border-top: 1px solid var(--vscode-panel-border);
-  display: flex; flex-direction: column; gap: 6px;
-  background: var(--vscode-sideBar-background); position: sticky; bottom: 0;
+  flex: 0 0 auto; padding: 6px; border-top: 1px solid var(--vscode-panel-border);
+  display: flex; flex-direction: column; gap: 5px;
+  background: var(--vscode-sideBar-background);
 }
 .commit-summary { display: flex; align-items: center; gap: 6px; }
 .avatar {
-  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; overflow: hidden;
+  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
   font-size: 10px; font-weight: 700; text-transform: uppercase;
   background: var(--vscode-button-background); color: var(--vscode-button-foreground);
 }
 .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 #summary, #description {
-  width: 100%; padding: 5px 8px; border-radius: 2px;
+  width: 100%; padding: 4px 7px; border-radius: 2px; font-size: 12px;
   background: var(--vscode-input-background); color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, transparent);
 }
 #summary:focus, #description:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
-#description { resize: vertical; min-height: 34px; max-height: 140px; }
+#description { resize: vertical; min-height: 30px; max-height: 140px; }
 #commitBtn {
-  width: 100%; padding: 6px 10px; border: 0; border-radius: 2px; cursor: pointer;
+  width: 100%; padding: 5px 10px; border: 0; border-radius: 2px; cursor: pointer; font-size: 12px;
   background: var(--vscode-button-background); color: var(--vscode-button-foreground);
 }
 #commitBtn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
@@ -463,11 +463,13 @@ function visibleChanges() {
 function renderChanges() {
   const list = $("fileList");
   const vis = visibleChanges();
+  const has = state.changes.length > 0;
   $("changesBadge").textContent = state.changes.length;
-  $("noChanges").hidden = state.changes.length > 0;
-  $("commitBox").style.display = state.changes.length > 0 ? "" : "none";
-  $("allRow").style.display = state.changes.length > 0 ? "" : "none";
-  $("filterWrap").style.display = state.changes.length > 0 ? "" : "none";
+  $("noChanges").hidden = has;
+  $("fileList").hidden = !has;
+  $("commitBox").hidden = !has;
+  $("allRow").hidden = !has;
+  $("filterWrap").hidden = !has;
 
   const n = state.selectedFiles.size;
   $("allText").textContent = n + " of " + state.changes.length + " file" + (state.changes.length === 1 ? "" : "s") + " to commit";
