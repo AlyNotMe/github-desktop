@@ -430,34 +430,42 @@ export class GitOperationsService {
     }
 
     try {
-      // Check if current branch has a remote tracking branch
-      const trackingInfo = await git.raw(["branch", "-vv", "--no-color"]);
-      const lines = trackingInfo.split("\n");
+      // Ask git directly whether the current branch has an upstream. This is
+      // reliable regardless of `git branch -vv` formatting or brackets in commit
+      // subjects (the old parser could misread both ways).
       let remoteBranch: string | null = null;
       let ahead = 0;
       let behind = 0;
 
-      for (const line of lines) {
-        if (line.trim().startsWith("*")) {
-          // Parse remote tracking info
-          const match = line.match(/\[([^\]]+)\]/);
-          if (match) {
-            const trackingPart = match[1];
-            const remoteParts = trackingPart.split(":");
-            remoteBranch = remoteParts[0].trim();
+      try {
+        remoteBranch = (
+          await git.raw([
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+          ])
+        ).trim() || null;
+      } catch {
+        remoteBranch = null;
+      }
 
-            // Parse ahead/behind
-            const aheadMatch = trackingPart.match(/ahead (\d+)/);
-            const behindMatch = trackingPart.match(/behind (\d+)/);
-
-            if (aheadMatch) {
-              ahead = parseInt(aheadMatch[1], 10);
-            }
-            if (behindMatch) {
-              behind = parseInt(behindMatch[1], 10);
-            }
-          }
-          break;
+      if (remoteBranch) {
+        try {
+          const counts = (
+            await git.raw([
+              "rev-list",
+              "--left-right",
+              "--count",
+              "@{upstream}...HEAD",
+            ])
+          )
+            .trim()
+            .split(/\s+/);
+          behind = parseInt(counts[0], 10) || 0;
+          ahead = parseInt(counts[1], 10) || 0;
+        } catch {
+          // leave ahead/behind at 0
         }
       }
 
