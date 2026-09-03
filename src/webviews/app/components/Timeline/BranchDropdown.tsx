@@ -331,6 +331,7 @@ export const BranchDropdown: React.FC<BranchDropdownProps> = ({
         open={open}
         anchorEl={anchorEl}
         onClose={handleClose}
+        marginThreshold={8}
         anchorOrigin={{
           vertical: "bottom",
           horizontal: "left",
@@ -342,7 +343,9 @@ export const BranchDropdown: React.FC<BranchDropdownProps> = ({
         PaperProps={{
           sx: {
             width: 320,
-            maxHeight: 450,
+            maxHeight: "calc(100vh - 16px)",
+            display: "flex",
+            flexDirection: "column",
             bgcolor: "var(--vscode-sideBar-background)",
             border: "1px solid var(--vscode-sideBarSectionHeader-border)",
             borderRadius: 1,
@@ -354,6 +357,7 @@ export const BranchDropdown: React.FC<BranchDropdownProps> = ({
         {/* Search */}
         <Box sx={{
           p: 1.5,
+          flexShrink: 0,
           bgcolor: "var(--vscode-sideBar-background)",
           display: "flex",
           gap: 1,
@@ -432,7 +436,9 @@ export const BranchDropdown: React.FC<BranchDropdownProps> = ({
         {/* Content */}
         <Box
           sx={{
-            height: 280,
+            flex: 1,
+            minHeight: 0,
+            maxHeight: 280,
             overflow: "auto",
             bgcolor: "var(--vscode-sideBar-background)",
             "&::-webkit-scrollbar": {
@@ -501,6 +507,7 @@ export const BranchDropdown: React.FC<BranchDropdownProps> = ({
         <Box
           sx={{
             p: 1,
+            flexShrink: 0,
             bgcolor: "var(--vscode-sideBar-background)",
             borderTop: "1px solid var(--vscode-sideBarSectionHeader-border)",
           }}
