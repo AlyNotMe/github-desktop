@@ -163,6 +163,7 @@ const ICON = {
 
 const STYLES = `
 * { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
 :root { color-scheme: light dark; }
 html, body { height: 100%; }
 body {
@@ -208,6 +209,7 @@ button, input, textarea { font: inherit; color: inherit; }
   background: var(--vscode-sideBar-background);
   border-right: 1px solid var(--vscode-panel-border);
 }
+#body.no-diff #left { flex: 1 1 auto; border-right: 0; }
 #right { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
 
 /* ---- tabs ---- */
@@ -495,10 +497,16 @@ function renderChanges() {
   }
   updateCommitBtn();
 }
+function updateLayout() {
+  const show = !!state.selectedPath;
+  $("right").hidden = !show;
+  $("body").classList.toggle("no-diff", !show);
+}
 function selectFile(p) {
   state.selectedPath = p;
   state.selectedCommit = null;
   renderChanges();
+  updateLayout();
   $("diffHeader").hidden = false;
   $("diffPath").textContent = p;
   $("diffBody").innerHTML = '<div class="diff-meta" style="padding:8px">Loading…</div>';
@@ -659,9 +667,9 @@ window.addEventListener("message", (ev) => {
       if (state.selectedPath && !paths.has(state.selectedPath)) {
         state.selectedPath = null;
         $("diffHeader").hidden = true;
-        $("diffBody").innerHTML = '<div class="empty-block"><div class="empty-title">No file selected</div></div>';
       }
       renderChanges();
+      updateLayout();
       break;
     }
     case "updateHistory":
@@ -701,5 +709,6 @@ function setAvatar() {
 }
 setAvatar();
 renderToolbar();
+updateLayout();
 post("ready");
 `;
