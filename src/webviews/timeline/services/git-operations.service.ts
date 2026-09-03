@@ -85,9 +85,21 @@ export class GitOperationsService {
 
       const hasMoreCommits = log.all.length === 50;
 
+      // Local branches, plus remote branches that have no local counterpart yet
+      // (shown by their short name). Never expose "remotes/<remote>/<name>" refs
+      // directly: checking one out puts the repo in detached HEAD.
+      const localBranches = branch.all.filter((b) => !b.startsWith("remotes/"));
+      const localSet = new Set(localBranches);
+      const remoteOnly = new Set<string>();
+      for (const b of branch.all) {
+        const m = b.match(/^remotes\/[^/]+\/(.+)$/);
+        if (m && m[1] !== "HEAD" && !localSet.has(m[1])) remoteOnly.add(m[1]);
+      }
+      const branchList = [...localBranches, ...remoteOnly];
+
       // Get branch activity dates
       const branchActivity: Record<string, string> = {};
-      for (const branchName of branch.all) {
+      for (const branchName of branchList) {
         try {
           const lastCommit = await git.raw([
             "log",
@@ -105,7 +117,7 @@ export class GitOperationsService {
         changes,
         commits,
         hasMoreCommits,
-        branches: branch.all,
+        branches: branchList,
         currentBranch: branch.current,
         branchActivity,
         repository: {

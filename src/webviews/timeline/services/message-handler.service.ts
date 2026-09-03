@@ -499,11 +499,17 @@ export class MessageHandlerService {
     const repository = getPrimaryRepository(this.repositories);
     if (!repository || !branchName) return;
 
+    // Guard against detached HEAD: never check out a "remotes/<remote>/<name>"
+    // ref directly. Fall back to the short name so git creates/switches to the
+    // local tracking branch instead.
+    const remoteMatch = branchName.match(/^remotes\/[^/]+\/(.+)$/);
+    const target = remoteMatch ? remoteMatch[1] : branchName;
+
     try {
       const git = simpleGit(repository.localPath);
-      await git.checkout(branchName);
+      await git.checkout(target);
       await this.handleRefresh();
-      vscode.window.showInformationMessage(`Checked out branch: ${branchName}`);
+      vscode.window.showInformationMessage(`Checked out branch: ${target}`);
     } catch (error) {
       vscode.window.showErrorMessage(`Failed to checkout branch: ${error}`);
     }
