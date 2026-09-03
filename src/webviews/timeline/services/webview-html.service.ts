@@ -400,8 +400,11 @@ function renderToolbar() {
   const r = state.remote || {};
   const ico = $("syncIco"), label = $("syncLabel"), sub = $("syncSub"), count = $("syncCount");
   const svg = { fetch: ${JSON.stringify(ICON.fetch)}, push: ${JSON.stringify(ICON.push)}, pull: ${JSON.stringify(ICON.pull)}, publish: ${JSON.stringify(ICON.publish)} };
+  // Only claim "not published" when we positively know: a remote exists and
+  // git reported no upstream. Anything uncertain (status not received yet)
+  // defaults to Fetch rather than a misleading "Publish branch".
   let mode = "fetch";
-  if (!r.hasRemote || r.isPublished === false) mode = "publish";
+  if (r.hasRemote === true && r.isPublished === false && r.ahead === 0 && r.behind === 0) mode = "publish";
   else if (r.behind > 0) mode = "pull";
   else if (r.ahead > 0) mode = "push";
 
