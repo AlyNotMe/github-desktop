@@ -197,7 +197,7 @@ button, input, textarea { font: inherit; color: inherit; }
 
 /* ---- toolbar ---- */
 #toolbar {
-  display: flex; flex: 0 0 auto; height: 32px;
+  display: flex; flex: 0 0 auto; height: 30px;
   background: var(--gd-chrome);
   border-bottom: 1px solid var(--gd-border);
 }
@@ -239,7 +239,7 @@ button, input, textarea { font: inherit; color: inherit; }
 /* ---- tabs ---- */
 #tabs { display: flex; flex: 0 0 auto; background: var(--gd-chrome); border-bottom: 1px solid var(--gd-border); }
 .tab {
-  flex: 1 1 0; height: 41px; background: transparent; border: 0;
+  flex: 1 1 0; height: 32px; background: transparent; border: 0;
   border-bottom: 2px solid transparent; cursor: pointer; font-size: 12px;
   color: var(--vscode-descriptionForeground); font-weight: 500;
   display: flex; align-items: center; justify-content: center; gap: 6px;
@@ -250,7 +250,11 @@ button, input, textarea { font: inherit; color: inherit; }
   font-size: 10px; font-weight: 600; min-width: 16px; padding: 1px 5px; border-radius: 9px;
   background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
 }
-.tabpane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.tabpane { flex: 1 1 auto; min-height: 0; }
+/* Changes: one scroll for the whole pane; the commit box sticks to the bottom
+   but is still reachable by scrolling when the panel is very short. */
+#pane-changes { display: block; overflow-y: auto; overflow-x: hidden; }
+#pane-history { display: flex; flex-direction: column; overflow: hidden; }
 
 /* ---- changed files ---- */
 #filterWrap { flex: 0 0 auto; padding: 8px 10px 4px; }
@@ -266,7 +270,7 @@ button, input, textarea { font: inherit; color: inherit; }
   cursor: pointer;
 }
 #allRow input, .file-row input[type=checkbox] { width: 13px; height: 13px; accent-color: var(--gd-accent); cursor: pointer; }
-#fileList { flex: 1 1 0; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+#fileList { min-height: 0; }
 .file-row {
   display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; cursor: pointer;
   white-space: nowrap; font-size: 12px;
@@ -294,7 +298,8 @@ button, input, textarea { font: inherit; color: inherit; }
 
 /* ---- commit box ---- */
 #commitBox {
-  flex: 0 0 auto; padding: 8px; border-top: 1px solid var(--gd-border);
+  position: sticky; bottom: 0; z-index: 2;
+  padding: 8px; border-top: 1px solid var(--gd-border);
   display: flex; flex-direction: column; gap: 6px;
   background: var(--gd-chrome);
 }
@@ -365,12 +370,13 @@ button, input, textarea { font: inherit; color: inherit; }
 /* ---- empty states ---- */
 .empty-block {
   flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; text-align: center; padding: 32px; gap: 10px;
+  justify-content: center; text-align: center; padding: 24px 20px; gap: 8px;
 }
-.empty-emoji { opacity: .35; }
-.empty-emoji svg { width: 48px; height: 48px; }
-.empty-title { font-size: 15px; font-weight: 400; color: var(--vscode-foreground); }
-.empty-sub { font-size: 12px; color: var(--vscode-descriptionForeground); max-width: 260px; line-height: 1.5; }
+#noChanges { flex: 0 0 auto; padding: 28px 20px; }
+.empty-emoji { opacity: .3; }
+.empty-emoji svg { width: 32px; height: 32px; }
+.empty-title { font-size: 13px; font-weight: 400; color: var(--vscode-foreground); }
+.empty-sub { font-size: 11px; color: var(--vscode-descriptionForeground); max-width: 240px; line-height: 1.5; }
 
 /* ---- popup menu ---- */
 .menu {
