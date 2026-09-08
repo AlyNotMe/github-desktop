@@ -4,8 +4,10 @@ import {
   CommitDetail,
 } from "./interfaces/timeline-view-provider.interface";
 import {
+  InProgressOperation,
   RemoteStatus,
   RepositorySummary,
+  StashEntry,
 } from "./interfaces/repository-snapshot";
 
 /* ------------------------------------------------------------------ *
@@ -24,7 +26,16 @@ export type InboundMessage =
   | { command: "unstageFiles"; files: string[] }
   | { command: "commit"; message: string }
   | { command: "commitFiles"; message: string; files: string[] }
+  | { command: "amendCommit"; message: string; files: string[] }
+  | { command: "undoLastCommit" }
   | { command: "discardFiles"; files: string[] }
+  | { command: "markResolved"; files: string[] }
+  | { command: "abortOperation" }
+  | { command: "continueOperation" }
+  | { command: "getStashes" }
+  | { command: "stashPush"; message: string }
+  | { command: "stashApply"; index: number; drop: boolean }
+  | { command: "stashDrop"; index: number }
   | { command: "getWorkingDiff"; filePath: string }
   | { command: "fetch" }
   | { command: "pull" }
@@ -95,6 +106,14 @@ export type OutboundMessage =
     }
   | { command: "commitSucceeded" }
   | { command: "mergeConflict"; operation: string; files: string[] }
+  | {
+      command: "updateOperation";
+      operation: InProgressOperation | null;
+      conflicted: string[];
+      canUndo: boolean;
+      lastCommitSummary: string | null;
+    }
+  | { command: "updateStashes"; stashes: StashEntry[] }
   | { command: "workingDiff"; payload: { path: string; diff: string } }
   | { command: "fileDiff"; payload: { path: string; diff: string } }
   | { command: "commitDetail"; payload: CommitDetail }

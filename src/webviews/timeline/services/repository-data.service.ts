@@ -1,6 +1,7 @@
 import * as path from "path";
 import { GitClientFactory } from "../../../core/git/git-authenticator";
 import { RepositoryContext } from "../ports";
+import { detectInProgressOperation } from "./git-operation-state";
 import {
   ChangeEntry,
   CommitEntry,
@@ -8,8 +9,10 @@ import {
 } from "../interfaces/timeline-view-provider.interface";
 import {
   COMMITS_PAGE_SIZE,
+  InProgressOperation,
   RemoteStatus,
   RepositorySnapshot,
+  StashEntry,
 } from "../interfaces/repository-snapshot";
 
 /**
@@ -62,6 +65,8 @@ export class RepositoryDataService {
     );
 
     const branchList = this.listBranches(branch.all);
+    const operation = await this.detectOperation(git);
+    const canUndo = operation === null && (await this.hasParentCommit(git));
 
     return {
       changes,
@@ -77,6 +82,10 @@ export class RepositoryDataService {
       },
       remoteStatus,
       tags,
+      operation,
+      conflicted: status.conflicted,
+      canUndo,
+      stashes: await this.getStashes(git),
     };
   }
 
@@ -227,6 +236,45 @@ export class RepositoryDataService {
   }
 
   /* ---------------- internals ---------------- */
+
+  private detectOperation(
+    git: ReturnType<GitClientFactory["plain"]>,
+  ): Promise<InProgressOperation | null> {
+    return detectInProgressOperation(git);
+  }
+
+  private async hasParentCommit(
+    git: ReturnType<GitClientFactory["plain"]>,
+  ): Promise<boolean> {
+    try {
+      await git.raw(["rev-parse", "--verify", "-q", "HEAD^"]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async getStashes(
+    git: ReturnType<GitClientFactory["plain"]>,
+  ): Promise<StashEntry[]> {
+    try {
+      const raw = await git.raw(["stash", "list", "--format=%gd%x09%gs"]);
+      return raw
+        .split("\n")
+        .filter((l) => l.trim())
+        .map((line, index) => {
+          const [, subject = ""] = line.split("\t");
+          const onBranch = subject.match(/^(?:WIP on|On) ([^:]+):/);
+          return {
+            index,
+            message: subject.replace(/^(?:WIP on|On) [^:]+:\s*/, "") || subject,
+            branch: onBranch ? onBranch[1] : null,
+          };
+        });
+    } catch {
+      return [];
+    }
+  }
 
   private toCommitEntry(
     commit: {

@@ -85,7 +85,13 @@ ${STYLES}
     </div>
 
     <div class="tabpane" id="pane-changes">
-      <div id="conflictBar" hidden></div>
+      <div id="conflictBar" hidden>
+        <div id="conflictText"></div>
+        <div id="conflictActions">
+          <button id="conflictAbort" type="button">Abort</button>
+          <button id="conflictContinue" type="button">Continue</button>
+        </div>
+      </div>
       <div id="filterWrap">
         <input id="filter" type="text" placeholder="Filter changed files" autocomplete="off" spellcheck="false">
       </div>
@@ -105,11 +111,21 @@ ${STYLES}
           <input id="summary" type="text" placeholder="Summary (required)" autocomplete="off">
         </div>
         <textarea id="description" placeholder="Description"></textarea>
+        <input id="coAuthors" type="text" hidden autocomplete="off"
+          placeholder="Co-authors: @handle, Name &lt;email&gt;">
+        <div id="commitMeta">
+          <label id="amendRow"><input type="checkbox" id="amendCheck"> Amend last commit</label>
+          <button id="coAuthToggle" type="button" class="linklike">Add co-authors</button>
+        </div>
         <button id="commitBtn" type="button" disabled>Commit to <strong id="commitBranch">branch</strong></button>
       </div>
     </div>
 
     <div class="tabpane" id="pane-history" hidden>
+      <div id="undoBar" hidden>
+        <span id="undoText">Undo last commit</span>
+        <button id="undoBtn" type="button">Undo</button>
+      </div>
       <div id="commitList"></div>
       <div id="noHistory" class="empty-block" hidden>
         <div class="empty-title">No history</div>
@@ -403,9 +419,52 @@ button, input, textarea { font: inherit; color: inherit; }
 .load-more:hover:not(:disabled) { background: var(--vscode-list-hoverBackground); }
 #conflictBar {
   flex: 0 0 auto; padding: 8px 12px; font-size: 11px; line-height: 1.45;
+  display: flex; flex-direction: column; gap: 6px;
   background: var(--vscode-inputValidation-warningBackground, rgba(228,103,107,.15));
   border-bottom: 1px solid var(--vscode-inputValidation-warningBorder, #e4676b);
 }
+#conflictActions { display: flex; gap: 6px; }
+#conflictActions button {
+  flex: 1 1 0; padding: 5px 8px; border: 0; border-radius: var(--gd-radius);
+  cursor: pointer; font-size: 11px; font-weight: 600;
+  background: var(--vscode-button-secondaryBackground, rgba(128,128,128,.25));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+}
+#conflictContinue { background: var(--gd-accent); color: var(--gd-accent-fg); }
+#conflictActions button:disabled { opacity: .45; cursor: default; }
+
+/* ---- commit meta (amend / co-authors) ---- */
+#commitMeta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#amendRow { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--vscode-descriptionForeground); cursor: pointer; }
+#amendRow input { width: 13px; height: 13px; accent-color: var(--gd-accent); }
+.linklike { border: 0; background: transparent; cursor: pointer; font-size: 11px; color: var(--vscode-textLink-foreground); padding: 0; }
+.linklike:hover { text-decoration: underline; }
+#coAuthors {
+  width: 100%; padding: 6px 9px; border-radius: var(--gd-radius); font-size: 12px;
+  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--gd-border));
+}
+#coAuthors:focus { outline: 0; border-color: var(--vscode-focusBorder); }
+
+/* ---- undo bar ---- */
+#undoBar {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 7px 12px; font-size: 11px;
+  background: var(--gd-chrome); border-bottom: 1px solid var(--gd-border);
+}
+#undoText { color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#undoBtn {
+  flex: 0 0 auto; padding: 4px 12px; border: 1px solid var(--gd-border); border-radius: var(--gd-radius);
+  background: transparent; color: var(--vscode-foreground); cursor: pointer; font-size: 11px; font-weight: 600;
+}
+#undoBtn:hover { background: var(--vscode-list-hoverBackground); }
+
+.file-row.is-conflict .file-name { color: var(--vscode-errorForeground, #f14c4c); }
+.file-resolve {
+  flex: 0 0 auto; padding: 1px 7px; border: 1px solid var(--gd-border); border-radius: 10px;
+  background: transparent; color: inherit; cursor: pointer; font-size: 10px;
+}
+.file-resolve:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.2)); }
 `;
 
 const SCRIPT = String.raw`
@@ -432,6 +491,13 @@ const state = {
   filter: "",
   hasMore: false,
   loadingMore: false,
+  operation: null,
+  conflicted: [],
+  canUndo: false,
+  lastCommitSummary: null,
+  stashes: [],
+  amend: false,
+  coAuthors: "",
 };
 
 /* ---------- toolbar ---------- */
@@ -488,6 +554,7 @@ document.querySelectorAll(".tab").forEach((btn) => {
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b === btn));
     $("pane-changes").hidden = state.tab !== "changes";
     $("pane-history").hidden = state.tab !== "history";
+    renderUndoBar();
   };
 });
 
@@ -515,7 +582,9 @@ function renderChanges() {
   $("changesBadge").textContent = state.changes.length;
   $("noChanges").hidden = has;
   $("fileList").hidden = !has;
-  $("commitBox").hidden = !has;
+  // The commit box stays visible even with a clean tree so "Amend last commit"
+  // is reachable (GitHub Desktop behaviour).
+  $("commitBox").hidden = false;
   $("allRow").hidden = !has;
   $("filterWrap").hidden = !has;
 
@@ -528,23 +597,28 @@ function renderChanges() {
   for (const c of vis) {
     const parts = fileParts(c.path);
     const L = statusLetter(c.status);
+    const isConflict = state.conflicted.indexOf(c.path) >= 0;
     const row = document.createElement("div");
-    row.className = "file-row" + (state.selectedPath === c.path ? " is-selected" : "");
+    row.className = "file-row" + (state.selectedPath === c.path ? " is-selected" : "") + (isConflict ? " is-conflict" : "");
     row.innerHTML =
-      '<input type="checkbox" ' + (state.selectedFiles.has(c.path) ? "checked" : "") + '>' +
-      '<span class="status-sq st-' + L + '">' + L + '</span>' +
+      '<input type="checkbox" ' + (state.selectedFiles.has(c.path) ? "checked" : "") + (isConflict ? " disabled" : "") + '>' +
+      '<span class="status-sq st-' + (isConflict ? "C" : L) + '">' + (isConflict ? "C" : L) + '</span>' +
       '<span class="file-name"><span class="file-dir">' + esc(parts.dir) + '</span>' + esc(parts.name) + '</span>' +
-      '<button class="file-x" title="Discard changes" type="button">×</button>';
+      (isConflict
+        ? '<button class="file-resolve" type="button">Mark resolved</button>'
+        : '<button class="file-x" title="Discard changes" type="button">×</button>');
     const cb = row.querySelector("input");
     cb.onclick = (e) => {
       e.stopPropagation();
+      if (isConflict) return;
       if (cb.checked) state.selectedFiles.add(c.path); else state.selectedFiles.delete(c.path);
       renderChanges();
     };
-    row.querySelector(".file-x").onclick = (e) => {
-      e.stopPropagation();
-      post("discardFiles", { files: [c.path] });
-    };
+    if (isConflict) {
+      row.querySelector(".file-resolve").onclick = (e) => { e.stopPropagation(); post("markResolved", { files: [c.path] }); };
+    } else {
+      row.querySelector(".file-x").onclick = (e) => { e.stopPropagation(); post("discardFiles", { files: [c.path] }); };
+    }
     row.onclick = () => selectFile(c.path);
     list.appendChild(row);
   }
@@ -573,31 +647,85 @@ $("allCheck").onclick = () => {
 $("filter").oninput = (e) => { state.filter = e.target.value; renderChanges(); };
 
 /* ---------- commit ---------- */
+function coAuthorTrailers() {
+  const raw = state.coAuthors.trim();
+  if (!raw) return "";
+  const parts = raw.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  const lines = parts.map((p) => {
+    const m = p.match(/^(.*?)\s*<([^>]+)>$/);
+    if (m) return "Co-Authored-By: " + m[1].trim() + " <" + m[2].trim() + ">";
+    const h = p.replace(/^@/, "");
+    return "Co-Authored-By: " + h + " <" + h + "@users.noreply.github.com>";
+  });
+  return lines.length ? "\n\n" + lines.join("\n") : "";
+}
 function updateCommitBtn() {
-  const ok = state.selectedFiles.size > 0 && $("summary").value.trim().length > 0;
+  const n = state.selectedFiles.size;
+  const hasMsg = $("summary").value.trim().length > 0;
+  const ok = hasMsg && (state.amend || n > 0);
   const btn = $("commitBtn");
   btn.disabled = !ok;
-  const n = state.selectedFiles.size;
-  btn.innerHTML = "Commit " + (n > 0 ? n + " file" + (n === 1 ? "" : "s") + " " : "") +
-    "to <strong>" + esc(state.currentBranch || "branch") + "</strong>";
+  if (state.amend) {
+    btn.innerHTML = "Amend last commit" + (n > 0 ? " (+" + n + " file" + (n === 1 ? "" : "s") + ")" : "");
+  } else {
+    btn.innerHTML = "Commit " + (n > 0 ? n + " file" + (n === 1 ? "" : "s") + " " : "") +
+      "to <strong>" + esc(state.currentBranch || "branch") + "</strong>";
+  }
 }
 $("summary").oninput = updateCommitBtn;
 function doCommit() {
   const summary = $("summary").value.trim();
-  if (!summary || state.selectedFiles.size === 0) return;
+  const n = state.selectedFiles.size;
+  if (!summary || (!state.amend && n === 0)) return;
   const desc = $("description").value.trim();
-  const message = desc ? summary + "\n\n" + desc : summary;
-  post("commitFiles", { message: message, files: Array.from(state.selectedFiles) });
+  const message = summary + (desc ? "\n\n" + desc : "") + coAuthorTrailers();
+  const files = Array.from(state.selectedFiles);
+  post(state.amend ? "amendCommit" : "commitFiles", { message: message, files: files });
   $("commitBtn").disabled = true;
-  // Inputs are cleared only once the extension acks with "commitSucceeded",
-  // so a failed commit doesn't lose the typed message.
+  // Inputs cleared only on the "commitSucceeded" ack.
 }
 $("commitBtn").onclick = doCommit;
-["summary", "description"].forEach((id) => {
+["summary", "description", "coAuthors"].forEach((id) => {
   $(id).addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
   });
 });
+$("coAuthors").oninput = (e) => { state.coAuthors = e.target.value; };
+$("coAuthToggle").onclick = () => {
+  const el = $("coAuthors");
+  el.hidden = !el.hidden;
+  $("coAuthToggle").textContent = el.hidden ? "Add co-authors" : "Hide co-authors";
+  if (!el.hidden) el.focus();
+};
+$("amendCheck").onchange = (e) => {
+  state.amend = e.target.checked;
+  if (state.amend && !$("summary").value.trim() && state.lastCommitSummary) {
+    $("summary").value = state.lastCommitSummary;
+  }
+  updateCommitBtn();
+};
+$("undoBtn").onclick = () => post("undoLastCommit");
+$("conflictAbort").onclick = () => post("abortOperation");
+$("conflictContinue").onclick = () => post("continueOperation");
+
+/* ---------- operation / undo bars ---------- */
+function renderOperation() {
+  const bar = $("conflictBar");
+  if (!state.operation) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const nc = state.conflicted.length;
+  $("conflictText").textContent = nc > 0
+    ? "⚠ " + state.operation + " paused — " + nc + " file(s) in conflict. Resolve each, then Continue."
+    : "✔ All conflicts resolved. Click Continue to finish the " + state.operation + ".";
+  $("conflictContinue").disabled = nc > 0;
+  if (state.operation) { state.tab = "changes"; $("pane-changes").hidden = false; $("pane-history").hidden = true;
+    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === "changes")); }
+}
+function renderUndoBar() {
+  const show = state.tab === "history" && !state.operation && state.canUndo && !!state.lastCommitSummary;
+  $("undoBar").hidden = !show;
+  if (show) $("undoText").textContent = 'Undo "' + (state.lastCommitSummary || "") + '"';
+}
 
 /* ---------- history ---------- */
 function renderHistory() {
@@ -756,6 +884,16 @@ $("branchCell").onclick = () => {
     };
     mkAction("＋  New branch…", startNewBranch);
     if (state.currentBranch) mkAction("⇡  Create pull request…", () => post("createPullRequest", { branch: state.currentBranch }));
+    if (state.changes.length > 0) mkAction("⇩  Stash all changes", () => post("stashPush", { message: "" }));
+    for (const s of state.stashes) {
+      const it = document.createElement("div");
+      it.className = "menu-item";
+      it.innerHTML = '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">↤ ' + esc(s.message || ("stash@{" + s.index + "}")) + '</span>' +
+        '<button class="file-resolve" data-a="pop">Pop</button><button class="file-resolve" data-a="drop">✕</button>';
+      it.querySelector('[data-a=pop]').onclick = (e) => { e.stopPropagation(); closeMenu(); post("stashApply", { index: s.index, drop: true }); };
+      it.querySelector('[data-a=drop]').onclick = (e) => { e.stopPropagation(); closeMenu(); post("stashDrop", { index: s.index }); };
+      m.appendChild(it);
+    }
     const sep = document.createElement("div"); sep.className = "menu-sep"; m.appendChild(sep);
 
     const filter = document.createElement("input");
@@ -862,18 +1000,28 @@ window.addEventListener("message", (ev) => {
       break;
     }
     case "commitSucceeded":
-      $("summary").value = ""; $("description").value = "";
+      $("summary").value = ""; $("description").value = ""; $("coAuthors").value = "";
+      state.coAuthors = "";
       state.selectedFiles.clear();
+      state.amend = false; $("amendCheck").checked = false;
       updateCommitBtn();
       break;
     case "mergeConflict":
+      // Detailed state arrives via updateOperation on the following refresh;
+      // this just flips to the Changes tab immediately.
       state.tab = "changes";
       $("pane-changes").hidden = false; $("pane-history").hidden = true;
       document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === "changes"));
-      $("conflictBar").hidden = false;
-      $("conflictBar").textContent = "⚠ " + (msg.operation || "operation") + " stopped — " +
-        (msg.files || []).length + " file(s) in conflict. Resolve them, then commit.";
-      renderChanges();
+      break;
+    case "updateOperation":
+      state.operation = msg.operation || null;
+      state.conflicted = msg.conflicted || [];
+      state.canUndo = !!msg.canUndo;
+      state.lastCommitSummary = msg.lastCommitSummary || null;
+      renderOperation(); renderChanges(); renderUndoBar();
+      break;
+    case "updateStashes":
+      state.stashes = msg.stashes || [];
       break;
     case "updateBranches":
       state.branches = msg.branches || [];
@@ -920,6 +1068,8 @@ function setAvatar() {
 }
 setAvatar();
 renderToolbar();
+renderOperation();
+renderUndoBar();
 updateLayout();
 post("ready");
 `;

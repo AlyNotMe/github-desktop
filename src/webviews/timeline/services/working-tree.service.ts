@@ -59,6 +59,63 @@ export class WorkingTreeService extends RepositoryScopedService {
     });
   }
 
+  /**
+   * Rewrites the last commit with `message` and, if `files` is non-empty, adds
+   * those paths to it. Refuses when the commit is already published.
+   */
+  amend(message: string, files: string[]): Promise<void | undefined> {
+    return this.withRepo(async (repo) => {
+      if (!message.trim()) {
+        return;
+      }
+      const git = this.git.plain(repo.localPath);
+      const pushed = await git
+        .raw(["branch", "-r", "--contains", "HEAD"])
+        .catch(() => "");
+      if (pushed.trim()) {
+        const ok = await this.notifier.confirm(
+          "The last commit is already on a remote. Amending rewrites history and will need a force-push. Continue?",
+          "Amend anyway",
+        );
+        if (!ok) {
+          return;
+        }
+      }
+      if (files.length > 0) {
+        await git.add(files);
+      }
+      await git.raw(["commit", "--amend", "-m", message]);
+      this.channel.post({ command: "commitSucceeded" });
+      this.notifier.info("Last commit amended");
+      await this.refresher.refresh();
+    });
+  }
+
+  /**
+   * Undoes the last commit, keeping its changes staged in the working tree
+   * (`git reset --soft HEAD~1`) — the GitHub Desktop "Undo" behaviour.
+   */
+  undoLastCommit(): Promise<void | undefined> {
+    return this.withRepo(async (repo) => {
+      const git = this.git.plain(repo.localPath);
+      const summary = (
+        await git.raw(["log", "-1", "--format=%s"]).catch(() => "")
+      ).trim();
+      const ok = await this.notifier.confirm(
+        summary
+          ? `Undo commit "${summary}"? Its changes stay in your working tree.`
+          : "Undo the last commit? Its changes stay in your working tree.",
+        "Undo",
+      );
+      if (!ok) {
+        return;
+      }
+      await git.reset(["--soft", "HEAD~1"]);
+      this.notifier.info("Last commit undone");
+      await this.refresher.refresh();
+    });
+  }
+
   discard(files: string[]): Promise<void | undefined> {
     return this.withRepo(async (repo) => {
       if (files.length === 0) {

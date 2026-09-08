@@ -13,9 +13,11 @@ import {
 } from "./ports";
 import { BranchService } from "./services/branch.service";
 import { CommitActionsService } from "./services/commit-actions.service";
+import { ConflictService } from "./services/conflict.service";
 import { DiffService } from "./services/diff.service";
 import { PullRequestService } from "./services/pull-request.service";
 import { RepositoryDataService } from "./services/repository-data.service";
+import { StashService } from "./services/stash.service";
 import { SyncService } from "./services/sync.service";
 import { WorkingTreeService } from "./services/working-tree.service";
 
@@ -66,6 +68,8 @@ export class TimelineController implements Refresher {
     );
     const pr = new PullRequestService(repos, notifier, browser);
     const diff = new DiffService(repos, notifier, git, this.data, channel);
+    const conflict = new ConflictService(repos, notifier, git, this);
+    const stash = new StashService(repos, notifier, git, this);
 
     this.router = new MessageRouter(notifier)
       .on("ready", () => this.refresh())
@@ -74,7 +78,16 @@ export class TimelineController implements Refresher {
       .on("unstageFiles", (m) => working.unstage(m.files))
       .on("commit", (m) => working.commit(m.message))
       .on("commitFiles", (m) => working.commitFiles(m.message, m.files))
+      .on("amendCommit", (m) => working.amend(m.message, m.files))
+      .on("undoLastCommit", () => working.undoLastCommit())
       .on("discardFiles", (m) => working.discard(m.files))
+      .on("markResolved", (m) => conflict.markResolved(m.files))
+      .on("continueOperation", () => conflict.continue())
+      .on("abortOperation", () => conflict.abort())
+      .on("getStashes", () => this.refresh())
+      .on("stashPush", (m) => stash.push(m.message))
+      .on("stashApply", (m) => stash.apply(m.index, m.drop))
+      .on("stashDrop", (m) => stash.drop(m.index))
       .on("getWorkingDiff", (m) => working.workingDiff(m.filePath))
       .on("fetch", () => sync.fetch())
       .on("pull", () => sync.pull())
@@ -163,6 +176,16 @@ export class TimelineController implements Refresher {
       remoteStatus: snapshot.remoteStatus,
       tags: snapshot.tags,
     });
+
+    channel.post({
+      command: "updateOperation",
+      operation: snapshot.operation,
+      conflicted: snapshot.conflicted,
+      canUndo: snapshot.canUndo,
+      lastCommitSummary: snapshot.commits[0]?.message.split("\n")[0] ?? null,
+    });
+
+    channel.post({ command: "updateStashes", stashes: snapshot.stashes });
   }
 
   private async loadMore(offset: number): Promise<void> {
