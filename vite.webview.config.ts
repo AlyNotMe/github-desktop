@@ -17,7 +17,6 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, "src/webviews/bootstrap.tsx"),
         'commit-detail': path.resolve(__dirname, "src/webviews/commitDetail/index.tsx"),
         'history-explorer': path.resolve(__dirname, "src/webviews/historyExplorerApp/index.tsx"),
       },
