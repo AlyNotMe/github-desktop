@@ -82,6 +82,7 @@ ${STYLES}
     </div>
 
     <div class="tabpane" id="pane-changes">
+      <div id="conflictBar" hidden></div>
       <div id="filterWrap">
         <input id="filter" type="text" placeholder="Filter changed files" autocomplete="off" spellcheck="false">
       </div>
@@ -359,6 +360,23 @@ button, input, textarea { font: inherit; color: inherit; }
 .menu-item.is-current { color: var(--vscode-descriptionForeground); }
 .menu-sep { height: 1px; margin: 4px 0; background: var(--vscode-panel-border); }
 .menu-empty { padding: 6px 8px; color: var(--vscode-descriptionForeground); }
+.menu-item.is-danger { color: var(--vscode-errorForeground, #f14c4c); }
+.menu-btn {
+  flex: 1 1 0; padding: 4px 6px; border: 0; border-radius: 2px; cursor: pointer; font-size: 11px;
+  background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+}
+.menu-btn:hover { background: var(--vscode-button-hoverBackground); }
+.load-more {
+  width: 100%; padding: 6px; border: 0; background: transparent; cursor: pointer;
+  color: var(--vscode-textLink-foreground); font-size: 11px;
+}
+.load-more:hover:not(:disabled) { background: var(--vscode-list-hoverBackground); }
+#conflictBar {
+  flex: 0 0 auto; padding: 5px 8px; font-size: 11px;
+  background: var(--vscode-inputValidation-warningBackground, rgba(228,103,107,.15));
+  border-bottom: 1px solid var(--vscode-inputValidation-warningBorder, #e4676b);
+}
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
@@ -386,6 +404,8 @@ const state = {
   selectedPath: null,
   selectedCommit: null,
   filter: "",
+  hasMore: false,
+  loadingMore: false,
 };
 
 /* ---------- toolbar ---------- */
@@ -540,9 +560,9 @@ function doCommit() {
   const desc = $("description").value.trim();
   const message = desc ? summary + "\n\n" + desc : summary;
   post("commitFiles", { message: message, files: Array.from(state.selectedFiles) });
-  $("summary").value = ""; $("description").value = "";
-  state.selectedFiles.clear();
-  updateCommitBtn();
+  $("commitBtn").disabled = true;
+  // Inputs are cleared only once the extension acks with "commitSucceeded",
+  // so a failed commit doesn't lose the typed message.
 }
 $("commitBtn").onclick = doCommit;
 ["summary", "description"].forEach((id) => {
@@ -569,7 +589,64 @@ function renderHistory() {
       renderHistory();
       post("openCommitDetail", { hash: c.hash });
     };
+    row.oncontextmenu = (e) => { e.preventDefault(); openCommitMenu(e.clientX, e.clientY, c); };
     list.appendChild(row);
+  }
+  if (state.hasMore) {
+    const more = document.createElement("button");
+    more.className = "load-more"; more.type = "button";
+    more.textContent = state.loadingMore ? "Loading…" : "Load more commits";
+    more.disabled = state.loadingMore;
+    more.onclick = loadMore;
+    list.appendChild(more);
+  }
+}
+function loadMore() {
+  if (state.loadingMore || !state.hasMore) return;
+  state.loadingMore = true;
+  renderHistory();
+  post("loadMoreCommits", { offset: state.history.length });
+}
+$("commitList").addEventListener("scroll", () => {
+  const el = $("commitList");
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) loadMore();
+});
+
+const COMMIT_MENU = [
+  ["checkout", "Checkout this commit"],
+  ["createBranch", "Create branch from commit…"],
+  ["createTag", "Create tag…"],
+  ["sep"],
+  ["cherryPick", "Cherry-pick to current branch"],
+  ["revert", "Revert this commit"],
+  ["reset", "Reset current branch to here"],
+  ["sep"],
+  ["copySha", "Copy SHA"],
+  ["viewOnGitHub", "View on GitHub"],
+];
+function openCommitMenu(x, y, commit) {
+  openMenuAt(x, y, (m) => {
+    for (const entry of COMMIT_MENU) {
+      if (entry[0] === "sep") { const s = document.createElement("div"); s.className = "menu-sep"; m.appendChild(s); continue; }
+      const it = document.createElement("div");
+      it.className = "menu-item" + (entry[0] === "reset" ? " is-danger" : "");
+      it.textContent = entry[1];
+      it.onclick = () => { closeMenu(); runCommitAction(entry[0], commit); };
+      m.appendChild(it);
+    }
+  });
+}
+function runCommitAction(action, commit) {
+  const h = commit.hash;
+  switch (action) {
+    case "checkout": post("checkoutCommit", { hash: h }); break;
+    case "createBranch": post("createBranchFromCommit", { hash: h }); break;
+    case "createTag": post("createTagFromCommit", { hash: h }); break;
+    case "cherryPick": post("cherryPickCommit", { hash: h }); break;
+    case "revert": post("revertCommit", { hash: h }); break;
+    case "reset": post("resetToCommit", { hash: h }); break;
+    case "copySha": navigator.clipboard && navigator.clipboard.writeText(h); break;
+    case "viewOnGitHub": post("viewCommitOnGitHub", { hash: h }); break;
   }
 }
 
@@ -625,9 +702,34 @@ function openMenu(anchor, build) {
   });
   setTimeout(() => document.addEventListener("mousedown", onDocDown, true), 0);
 }
+function openMenuAt(x, y, build) {
+  menu.innerHTML = ""; build(menu);
+  menu.hidden = false;
+  menu.style.visibility = "hidden";
+  requestAnimationFrame(() => {
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let nx = x, ny = y;
+    if (nx + mw > window.innerWidth - 8) nx = window.innerWidth - 8 - mw;
+    if (ny + mh > window.innerHeight - 8) ny = Math.max(8, window.innerHeight - 8 - mh);
+    menu.style.left = Math.max(8, nx) + "px";
+    menu.style.top = Math.max(8, ny) + "px";
+    menu.style.visibility = "";
+  });
+  setTimeout(() => document.addEventListener("mousedown", onDocDown, true), 0);
+}
 
 $("branchCell").onclick = () => {
   openMenu($("branchCell"), (m) => {
+    const mkAction = (label, fn) => {
+      const it = document.createElement("div");
+      it.className = "menu-item"; it.textContent = label;
+      it.onclick = () => { closeMenu(); fn(); };
+      m.appendChild(it);
+    };
+    mkAction("＋  New branch…", startNewBranch);
+    if (state.currentBranch) mkAction("⇡  Create pull request…", () => post("createPullRequest", { branch: state.currentBranch }));
+    const sep = document.createElement("div"); sep.className = "menu-sep"; m.appendChild(sep);
+
     const filter = document.createElement("input");
     filter.className = "menu-filter"; filter.placeholder = "Find a branch…";
     m.appendChild(filter);
@@ -650,6 +752,38 @@ $("branchCell").onclick = () => {
     setTimeout(() => filter.focus(), 0);
   });
 };
+
+function startNewBranch() {
+  openMenu($("branchCell"), (m) => {
+    const input = document.createElement("input");
+    input.className = "menu-filter"; input.placeholder = "New branch name";
+    m.appendChild(input);
+    const dirty = state.changes.length > 0;
+    const hint = document.createElement("div");
+    hint.className = "menu-empty";
+    hint.textContent = dirty
+      ? "You have uncommitted changes — choose what to do:"
+      : "Press Enter to create from " + (state.currentBranch || "HEAD");
+    m.appendChild(hint);
+    const submit = (bringChanges) => {
+      const name = input.value.trim();
+      if (!name) return;
+      closeMenu();
+      if (dirty) post("createBranchWithChanges", { branchName: name, bringChanges: bringChanges });
+      else post("createBranch", { branchName: name });
+    };
+    if (dirty) {
+      const row = document.createElement("div"); row.style.display = "flex"; row.style.gap = "4px"; row.style.padding = "4px";
+      const a = document.createElement("button"); a.className = "menu-btn"; a.type = "button"; a.textContent = "Bring changes";
+      a.onclick = () => submit(true);
+      const b = document.createElement("button"); b.className = "menu-btn"; b.type = "button"; b.textContent = "Stash them";
+      b.onclick = () => submit(false);
+      row.appendChild(a); row.appendChild(b); m.appendChild(row);
+    }
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(true); } });
+    setTimeout(() => input.focus(), 0);
+  });
+}
 
 $("repoCell").onclick = () => {
   openMenu($("repoCell"), (m) => {
@@ -680,13 +814,38 @@ window.addEventListener("message", (ev) => {
         state.selectedPath = null;
         $("diffHeader").hidden = true;
       }
+      if (!state.changes.some((c) => /[UC]/.test(c.status || ""))) $("conflictBar").hidden = true;
       renderChanges();
       updateLayout();
       break;
     }
     case "updateHistory":
       state.history = msg.history || [];
+      state.hasMore = !!msg.hasMoreCommits;
+      state.loadingMore = false;
       renderHistory();
+      break;
+    case "loadMoreCommitsResponse": {
+      const seen = new Set(state.history.map((c) => c.hash));
+      state.history = state.history.concat((msg.history || []).filter((c) => !seen.has(c.hash)));
+      state.hasMore = !!msg.hasMoreCommits;
+      state.loadingMore = false;
+      renderHistory();
+      break;
+    }
+    case "commitSucceeded":
+      $("summary").value = ""; $("description").value = "";
+      state.selectedFiles.clear();
+      updateCommitBtn();
+      break;
+    case "mergeConflict":
+      state.tab = "changes";
+      $("pane-changes").hidden = false; $("pane-history").hidden = true;
+      document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === "changes"));
+      $("conflictBar").hidden = false;
+      $("conflictBar").textContent = "⚠ " + (msg.operation || "operation") + " stopped — " +
+        (msg.files || []).length + " file(s) in conflict. Resolve them, then commit.";
+      renderChanges();
       break;
     case "updateBranches":
       state.branches = msg.branches || [];
