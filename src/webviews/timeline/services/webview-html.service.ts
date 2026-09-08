@@ -51,28 +51,20 @@ ${STYLES}
 </head>
 <body>
 <div id="toolbar">
-  <button class="cell" id="repoCell" type="button">
+  <button class="cell" id="repoCell" type="button" title="Current repository">
     <span class="cell-ico">${ICON.repo}</span>
-    <span class="cell-text">
-      <span class="cell-label">Current repository</span>
-      <span class="cell-value" id="repoName">&mdash;</span>
-    </span>
+    <span class="cell-value" id="repoName">&mdash;</span>
     <span class="cell-caret">${ICON.caret}</span>
   </button>
-  <button class="cell" id="branchCell" type="button">
+  <button class="cell" id="branchCell" type="button" title="Current branch">
     <span class="cell-ico">${ICON.branch}</span>
-    <span class="cell-text">
-      <span class="cell-label">Current branch</span>
-      <span class="cell-value" id="branchName">&mdash;</span>
-    </span>
+    <span class="cell-value" id="branchName">&mdash;</span>
     <span class="cell-caret">${ICON.caret}</span>
   </button>
   <button class="cell" id="syncCell" type="button">
     <span class="cell-ico" id="syncIco">${ICON.fetch}</span>
-    <span class="cell-text">
-      <span class="cell-value" id="syncLabel">Fetch origin</span>
-      <span class="cell-label" id="syncSub">Never fetched</span>
-    </span>
+    <span class="cell-value" id="syncLabel">Fetch origin</span>
+    <span class="cell-label" id="syncSub" hidden></span>
     <span class="cell-count" id="syncCount" hidden></span>
   </button>
 </div>
@@ -205,13 +197,13 @@ button, input, textarea { font: inherit; color: inherit; }
 
 /* ---- toolbar ---- */
 #toolbar {
-  display: flex; flex: 0 0 auto; height: 50px;
+  display: flex; flex: 0 0 auto; height: 32px;
   background: var(--gd-chrome);
   border-bottom: 1px solid var(--gd-border);
 }
 .cell {
-  display: flex; align-items: center; gap: 8px;
-  flex: 1 1 0; min-width: 0; padding: 0 12px;
+  display: flex; align-items: center; gap: 6px;
+  flex: 1 1 0; min-width: 0; padding: 0 9px;
   background: transparent; border: 0;
   border-right: 1px solid var(--gd-border);
   cursor: pointer; text-align: left;
@@ -219,22 +211,18 @@ button, input, textarea { font: inherit; color: inherit; }
 .cell:last-child { border-right: 0; }
 .cell:hover { background: var(--vscode-list-hoverBackground); }
 .cell:active { background: var(--vscode-list-activeSelectionBackground); }
-.cell-ico { flex: 0 0 auto; display: flex; opacity: .85; }
-.cell-ico svg { width: 16px; height: 16px; }
-.cell-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-.cell-label {
-  font-size: 10px; line-height: 1.2; color: var(--vscode-descriptionForeground);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.cell-ico { flex: 0 0 auto; display: flex; opacity: .8; }
+.cell-ico svg { width: 14px; height: 14px; }
+.cell-label { display: none; }
 .cell-value {
-  font-weight: 600; font-size: 12px; line-height: 1.3;
+  flex: 1 1 auto; font-weight: 600; font-size: 11px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.cell-caret { flex: 0 0 auto; opacity: .55; }
-.cell-caret svg { width: 12px; height: 12px; }
+.cell-caret { flex: 0 0 auto; opacity: .5; }
+.cell-caret svg { width: 10px; height: 10px; }
 .cell-count {
   flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px;
-  font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 10px;
+  font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 9px;
   background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
 }
 
@@ -262,7 +250,7 @@ button, input, textarea { font: inherit; color: inherit; }
   font-size: 10px; font-weight: 600; min-width: 16px; padding: 1px 5px; border-radius: 9px;
   background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
 }
-.tabpane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.tabpane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
 /* ---- changed files ---- */
 #filterWrap { flex: 0 0 auto; padding: 8px 10px 4px; }
@@ -278,7 +266,7 @@ button, input, textarea { font: inherit; color: inherit; }
   cursor: pointer;
 }
 #allRow input, .file-row input[type=checkbox] { width: 13px; height: 13px; accent-color: var(--gd-accent); cursor: pointer; }
-#fileList { flex: 1 1 0; overflow: auto; min-height: 44px; }
+#fileList { flex: 1 1 0; overflow-y: auto; overflow-x: hidden; min-height: 0; }
 .file-row {
   display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; cursor: pointer;
   white-space: nowrap; font-size: 12px;
@@ -306,8 +294,8 @@ button, input, textarea { font: inherit; color: inherit; }
 
 /* ---- commit box ---- */
 #commitBox {
-  flex: 0 0 auto; padding: 10px; border-top: 1px solid var(--gd-border);
-  display: flex; flex-direction: column; gap: 8px;
+  flex: 0 0 auto; padding: 8px; border-top: 1px solid var(--gd-border);
+  display: flex; flex-direction: column; gap: 6px;
   background: var(--gd-chrome);
 }
 .commit-summary { display: flex; align-items: center; gap: 8px; }
@@ -325,7 +313,7 @@ button, input, textarea { font: inherit; color: inherit; }
 }
 #summary { font-weight: 600; }
 #summary:focus, #description:focus { outline: 0; border-color: var(--vscode-focusBorder); }
-#description { resize: vertical; min-height: 52px; max-height: 160px; }
+#description { resize: vertical; min-height: 44px; max-height: 140px; }
 #commitBtn {
   width: 100%; padding: 8px 12px; border: 0; border-radius: var(--gd-radius); cursor: pointer;
   font-size: 12px; font-weight: 600;
