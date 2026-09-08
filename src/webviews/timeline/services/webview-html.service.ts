@@ -51,27 +51,24 @@ ${STYLES}
 </head>
 <body>
 <div id="toolbar">
-  <button class="cell" id="repoCell" type="button">
+  <button class="cell" id="repoCell" type="button" title="Current repository">
     <span class="cell-ico">${ICON.repo}</span>
     <span class="cell-text">
-      <span class="cell-label">Current repository</span>
       <span class="cell-value" id="repoName">&mdash;</span>
     </span>
     <span class="cell-caret">${ICON.caret}</span>
   </button>
-  <button class="cell" id="branchCell" type="button">
+  <button class="cell" id="branchCell" type="button" title="Current branch">
     <span class="cell-ico">${ICON.branch}</span>
     <span class="cell-text">
-      <span class="cell-label">Current branch</span>
       <span class="cell-value" id="branchName">&mdash;</span>
     </span>
     <span class="cell-caret">${ICON.caret}</span>
   </button>
-  <button class="cell" id="syncCell" type="button">
+  <button class="cell" id="syncCell" type="button" title="Sync">
     <span class="cell-ico" id="syncIco">${ICON.fetch}</span>
     <span class="cell-text">
-      <span class="cell-label" id="syncLabel">Fetch origin</span>
-      <span class="cell-value cell-sub" id="syncSub">Never fetched</span>
+      <span class="cell-value" id="syncLabel">Fetch origin</span>
     </span>
     <span class="cell-count" id="syncCount" hidden></span>
   </button>
@@ -178,13 +175,13 @@ button, input, textarea { font: inherit; color: inherit; }
 
 /* ---- toolbar ---- */
 #toolbar {
-  display: flex; flex: 0 0 auto; height: 42px;
+  display: flex; flex: 0 0 auto; height: 26px;
   background: var(--vscode-sideBar-background);
   border-bottom: 1px solid var(--vscode-panel-border);
 }
 .cell {
-  display: flex; align-items: center; gap: 7px;
-  flex: 1 1 0; min-width: 0; padding: 0 10px;
+  display: flex; align-items: center; gap: 5px;
+  flex: 1 1 0; min-width: 0; padding: 0 7px;
   background: transparent; border: 0;
   border-right: 1px solid var(--vscode-panel-border);
   cursor: pointer; text-align: left;
@@ -192,13 +189,13 @@ button, input, textarea { font: inherit; color: inherit; }
 .cell:last-child { border-right: 0; }
 .cell:hover { background: var(--vscode-list-hoverBackground); }
 .cell-ico { flex: 0 0 auto; display: flex; opacity: .8; }
-.cell-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
-.cell-label { font-size: 10px; color: var(--vscode-descriptionForeground); }
-.cell-value { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cell-sub { font-weight: 400; font-size: 10px; color: var(--vscode-descriptionForeground); }
+.cell-ico svg { width: 14px; height: 14px; }
+.cell-text { display: flex; flex-direction: column; min-width: 0; }
+.cell-value { font-weight: 600; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cell-caret { flex: 0 0 auto; opacity: .6; }
+.cell-caret svg { width: 10px; height: 10px; }
 .cell-count {
-  flex: 0 0 auto; font-size: 11px; padding: 1px 5px; border-radius: 8px;
+  flex: 0 0 auto; font-size: 10px; padding: 0 4px; border-radius: 8px;
   background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
 }
 
@@ -215,8 +212,8 @@ button, input, textarea { font: inherit; color: inherit; }
 /* ---- tabs ---- */
 #tabs { display: flex; flex: 0 0 auto; border-bottom: 1px solid var(--vscode-panel-border); }
 .tab {
-  flex: 1 1 0; padding: 5px 4px; background: transparent; border: 0;
-  border-bottom: 2px solid transparent; cursor: pointer; font-size: 12px;
+  flex: 1 1 0; padding: 3px 4px; background: transparent; border: 0;
+  border-bottom: 2px solid transparent; cursor: pointer; font-size: 11px;
   color: var(--vscode-descriptionForeground); font-weight: 500;
 }
 .tab:hover { background: var(--vscode-list-hoverBackground); }
@@ -225,25 +222,25 @@ button, input, textarea { font: inherit; color: inherit; }
   font-size: 10px; padding: 0 5px; border-radius: 8px;
   background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
 }
-.tabpane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.tabpane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 
 /* ---- changed files ---- */
-#filterWrap { flex: 0 0 auto; padding: 6px; }
+#filterWrap { flex: 0 0 auto; padding: 4px; }
 #filter {
-  width: 100%; padding: 3px 7px; border-radius: 2px; font-size: 12px;
+  width: 100%; padding: 2px 6px; border-radius: 2px; font-size: 11px;
   background: var(--vscode-input-background); color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, transparent);
 }
 #filter:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
 #allRow {
-  flex: 0 0 auto; display: flex; align-items: center; gap: 7px;
-  padding: 3px 8px; font-size: 11px; color: var(--vscode-descriptionForeground);
+  flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+  padding: 2px 8px; font-size: 10px; color: var(--vscode-descriptionForeground);
   border-bottom: 1px solid var(--vscode-panel-border); cursor: pointer;
 }
 #fileList { flex: 1 1 0; overflow: auto; min-height: 44px; }
 .file-row {
-  display: flex; align-items: center; gap: 7px; padding: 2px 8px; cursor: pointer;
-  white-space: nowrap;
+  display: flex; align-items: center; gap: 6px; padding: 1px 8px; cursor: pointer;
+  white-space: nowrap; font-size: 12px;
 }
 .file-row:hover { background: var(--vscode-list-hoverBackground); }
 .file-row.is-selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
@@ -269,27 +266,27 @@ button, input, textarea { font: inherit; color: inherit; }
 
 /* ---- commit box ---- */
 #commitBox {
-  flex: 0 0 auto; padding: 6px; border-top: 1px solid var(--vscode-panel-border);
-  display: flex; flex-direction: column; gap: 5px;
+  flex: 0 0 auto; padding: 5px; border-top: 1px solid var(--vscode-panel-border);
+  display: flex; flex-direction: column; gap: 4px;
   background: var(--vscode-sideBar-background);
 }
-.commit-summary { display: flex; align-items: center; gap: 6px; }
+.commit-summary { display: flex; align-items: center; gap: 5px; }
 .avatar {
-  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; overflow: hidden;
+  flex: 0 0 auto; width: 18px; height: 18px; border-radius: 50%; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
   background: var(--vscode-button-background); color: var(--vscode-button-foreground);
 }
 .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 #summary, #description {
-  width: 100%; padding: 4px 7px; border-radius: 2px; font-size: 12px;
+  width: 100%; padding: 3px 6px; border-radius: 2px; font-size: 11px;
   background: var(--vscode-input-background); color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, transparent);
 }
 #summary:focus, #description:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
-#description { resize: vertical; min-height: 30px; max-height: 140px; }
+#description { resize: vertical; min-height: 22px; max-height: 100px; }
 #commitBtn {
-  width: 100%; padding: 5px 10px; border: 0; border-radius: 2px; cursor: pointer; font-size: 12px;
+  width: 100%; padding: 4px 10px; border: 0; border-radius: 2px; cursor: pointer; font-size: 11px;
   background: var(--vscode-button-background); color: var(--vscode-button-foreground);
 }
 #commitBtn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
@@ -398,7 +395,7 @@ function renderToolbar() {
   $("commitBranch").textContent = state.currentBranch || "branch";
 
   const r = state.remote || {};
-  const ico = $("syncIco"), label = $("syncLabel"), sub = $("syncSub"), count = $("syncCount");
+  const ico = $("syncIco"), label = $("syncLabel"), count = $("syncCount"), cell = $("syncCell");
   const svg = { fetch: ${JSON.stringify(ICON.fetch)}, push: ${JSON.stringify(ICON.push)}, pull: ${JSON.stringify(ICON.pull)}, publish: ${JSON.stringify(ICON.publish)} };
   // Only claim "not published" when we positively know: a remote exists and
   // git reported no upstream. Anything uncertain (status not received yet)
@@ -410,11 +407,11 @@ function renderToolbar() {
 
   ico.innerHTML = svg[mode];
   count.hidden = true;
-  if (mode === "publish") { label.textContent = "Publish branch"; sub.textContent = "This branch is not on the remote yet"; }
-  else if (mode === "pull") { label.textContent = "Pull origin"; sub.textContent = relFetched(r.lastFetched); count.hidden = false; count.textContent = "↓ " + r.behind; }
-  else if (mode === "push") { label.textContent = "Push origin"; sub.textContent = relFetched(r.lastFetched); count.hidden = false; count.textContent = "↑ " + r.ahead; }
-  else { label.textContent = "Fetch origin"; sub.textContent = relFetched(r.lastFetched); }
-  $("syncCell").dataset.mode = mode;
+  if (mode === "publish") { label.textContent = "Publish branch"; cell.title = "This branch is not on the remote yet"; }
+  else if (mode === "pull") { label.textContent = "Pull origin"; cell.title = relFetched(r.lastFetched); count.hidden = false; count.textContent = "↓ " + r.behind; }
+  else if (mode === "push") { label.textContent = "Push origin"; cell.title = relFetched(r.lastFetched); count.hidden = false; count.textContent = "↑ " + r.ahead; }
+  else { label.textContent = "Fetch origin"; cell.title = relFetched(r.lastFetched); }
+  cell.dataset.mode = mode;
 }
 function relFetched(d) {
   if (!d) return "Never fetched";
