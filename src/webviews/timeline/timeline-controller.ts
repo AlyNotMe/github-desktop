@@ -102,6 +102,7 @@ export class TimelineController implements Refresher {
       .on("mergeBranch", (m) => branch.merge(m.fromBranch, m.toBranch))
       .on("compareBranch", (m) => branch.compare(m.branch))
       .on("createPullRequest", (m) => pr.openCompare(m.branch))
+      .on("openRepoOnGitHub", () => pr.openRepo())
       .on("loadMoreCommits", (m) => this.loadMore(m.offset))
       .on("openCommitDetail", (m) =>
         deps.commitDetail.showCommitDetails(m.hash),

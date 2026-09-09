@@ -52,6 +52,7 @@ export type InboundMessage =
   | { command: "mergeBranch"; fromBranch: string; toBranch: string }
   | { command: "compareBranch"; branch: string }
   | { command: "createPullRequest"; branch: string }
+  | { command: "openRepoOnGitHub" }
   | { command: "loadMoreCommits"; offset: number }
   | { command: "openCommitDetail"; hash: string }
   | { command: "getCommitDetails"; hash: string }

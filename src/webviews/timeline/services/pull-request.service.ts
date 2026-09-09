@@ -26,4 +26,16 @@ export class PullRequestService extends RepositoryScopedService {
       this.browser.open(`${base}/compare/${branch}?expand=1`);
     });
   }
+
+  /** Opens the repository's GitHub page in the browser. */
+  openRepo(): Promise<void | undefined> {
+    return this.withRepo(async (repo) => {
+      const base = toGitHubWebUrl(repo.remoteUrl);
+      if (!base) {
+        this.notifier.warn("No GitHub remote configured");
+        return;
+      }
+      this.browser.open(base);
+    });
+  }
 }
