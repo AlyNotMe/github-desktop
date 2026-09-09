@@ -51,28 +51,20 @@ ${STYLES}
 </head>
 <body>
 <div id="toolbar">
-  <button class="cell" id="repoCell" type="button">
+  <button class="cell" id="repoCell" type="button" title="Current repository">
     <span class="cell-ico">${ICON.repo}</span>
-    <span class="cell-text">
-      <span class="cell-label">Current repository</span>
-      <span class="cell-value" id="repoName">&mdash;</span>
-    </span>
+    <span class="cell-value" id="repoName">&mdash;</span>
     <span class="cell-caret">${ICON.caret}</span>
   </button>
-  <button class="cell" id="branchCell" type="button">
+  <button class="cell" id="branchCell" type="button" title="Current branch">
     <span class="cell-ico">${ICON.branch}</span>
-    <span class="cell-text">
-      <span class="cell-label">Current branch</span>
-      <span class="cell-value" id="branchName">&mdash;</span>
-    </span>
+    <span class="cell-value" id="branchName">&mdash;</span>
     <span class="cell-caret">${ICON.caret}</span>
   </button>
   <button class="cell" id="syncCell" type="button">
     <span class="cell-ico" id="syncIco">${ICON.fetch}</span>
-    <span class="cell-text">
-      <span class="cell-label" id="syncLabel">Fetch origin</span>
-      <span class="cell-value cell-sub" id="syncSub">Never fetched</span>
-    </span>
+    <span class="cell-value" id="syncLabel">Fetch origin</span>
+    <span class="cell-label" id="syncSub" hidden></span>
     <span class="cell-count" id="syncCount" hidden></span>
   </button>
 </div>
@@ -85,6 +77,13 @@ ${STYLES}
     </div>
 
     <div class="tabpane" id="pane-changes">
+      <div id="conflictBar" hidden>
+        <div id="conflictText"></div>
+        <div id="conflictActions">
+          <button id="conflictAbort" type="button">Abort</button>
+          <button id="conflictContinue" type="button">Continue</button>
+        </div>
+      </div>
       <div id="filterWrap">
         <input id="filter" type="text" placeholder="Filter changed files" autocomplete="off" spellcheck="false">
       </div>
@@ -104,11 +103,21 @@ ${STYLES}
           <input id="summary" type="text" placeholder="Summary (required)" autocomplete="off">
         </div>
         <textarea id="description" placeholder="Description"></textarea>
+        <input id="coAuthors" type="text" hidden autocomplete="off"
+          placeholder="Co-authors: @handle, Name &lt;email&gt;">
+        <div id="commitMeta">
+          <label id="amendRow"><input type="checkbox" id="amendCheck"> Amend last commit</label>
+          <button id="coAuthToggle" type="button" class="linklike">Add co-authors</button>
+        </div>
         <button id="commitBtn" type="button" disabled>Commit to <strong id="commitBranch">branch</strong></button>
       </div>
     </div>
 
     <div class="tabpane" id="pane-history" hidden>
+      <div id="undoBar" hidden>
+        <span id="undoText">Undo last commit</span>
+        <button id="undoBtn" type="button">Undo</button>
+      </div>
       <div id="commitList"></div>
       <div id="noHistory" class="empty-block" hidden>
         <div class="empty-title">No history</div>
@@ -164,207 +173,292 @@ const ICON = {
 const STYLES = `
 * { box-sizing: border-box; margin: 0; padding: 0; }
 [hidden] { display: none !important; }
-:root { color-scheme: light dark; }
+:root {
+  color-scheme: light dark;
+  --gd-accent: var(--vscode-button-background, #1f6feb);
+  --gd-accent-fg: var(--vscode-button-foreground, #fff);
+  --gd-chrome: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background));
+  --gd-border: var(--vscode-panel-border, rgba(128,128,128,.28));
+  --gd-radius: 6px;
+}
 html, body { height: 100%; }
 body {
   display: flex; flex-direction: column;
-  font-family: var(--vscode-font-family, "Segoe UI", system-ui, sans-serif);
-  font-size: var(--vscode-font-size, 13px);
+  font-family: var(--vscode-font-family, -apple-system, "Segoe UI", system-ui, sans-serif);
+  font-size: 12px; line-height: 1.4;
   color: var(--vscode-foreground);
-  background: var(--vscode-editor-background);
+  background: var(--vscode-sideBar-background);
   overflow: hidden;
 }
 button, input, textarea { font: inherit; color: inherit; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 5px; background-clip: padding-box; border: 2px solid transparent; }
+::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
 
 /* ---- toolbar ---- */
 #toolbar {
-  display: flex; flex: 0 0 auto; height: 42px;
-  background: var(--vscode-sideBar-background);
-  border-bottom: 1px solid var(--vscode-panel-border);
+  display: flex; flex: 0 0 auto; height: 30px;
+  background: var(--gd-chrome);
+  border-bottom: 1px solid var(--gd-border);
 }
 .cell {
-  display: flex; align-items: center; gap: 7px;
-  flex: 1 1 0; min-width: 0; padding: 0 10px;
+  display: flex; align-items: center; gap: 6px;
+  flex: 1 1 0; min-width: 0; padding: 0 9px;
   background: transparent; border: 0;
-  border-right: 1px solid var(--vscode-panel-border);
+  border-right: 1px solid var(--gd-border);
   cursor: pointer; text-align: left;
 }
 .cell:last-child { border-right: 0; }
 .cell:hover { background: var(--vscode-list-hoverBackground); }
+.cell:active { background: var(--vscode-list-activeSelectionBackground); }
 .cell-ico { flex: 0 0 auto; display: flex; opacity: .8; }
-.cell-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
-.cell-label { font-size: 10px; color: var(--vscode-descriptionForeground); }
-.cell-value { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cell-sub { font-weight: 400; font-size: 10px; color: var(--vscode-descriptionForeground); }
-.cell-caret { flex: 0 0 auto; opacity: .6; }
+.cell-ico svg { width: 14px; height: 14px; }
+.cell-label { display: none; }
+.cell-value {
+  flex: 1 1 auto; font-weight: 600; font-size: 11px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cell-caret { flex: 0 0 auto; opacity: .5; }
+.cell-caret svg { width: 10px; height: 10px; }
 .cell-count {
-  flex: 0 0 auto; font-size: 11px; padding: 1px 5px; border-radius: 8px;
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px;
+  font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 9px;
   background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
 }
 
 /* ---- body split ---- */
 #body { flex: 1 1 auto; display: flex; min-height: 0; }
 #left {
-  flex: 0 0 272px; display: flex; flex-direction: column; min-height: 0;
+  flex: 0 0 300px; display: flex; flex-direction: column; min-height: 0;
   background: var(--vscode-sideBar-background);
-  border-right: 1px solid var(--vscode-panel-border);
+  border-right: 1px solid var(--gd-border);
 }
 #body.no-diff #left { flex: 1 1 auto; border-right: 0; }
-#right { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; }
+#right { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; background: var(--vscode-editor-background); }
 
 /* ---- tabs ---- */
-#tabs { display: flex; flex: 0 0 auto; border-bottom: 1px solid var(--vscode-panel-border); }
+#tabs { display: flex; flex: 0 0 auto; background: var(--gd-chrome); border-bottom: 1px solid var(--gd-border); }
 .tab {
-  flex: 1 1 0; padding: 5px 4px; background: transparent; border: 0;
+  flex: 1 1 0; height: 32px; background: transparent; border: 0;
   border-bottom: 2px solid transparent; cursor: pointer; font-size: 12px;
   color: var(--vscode-descriptionForeground); font-weight: 500;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
 }
-.tab:hover { background: var(--vscode-list-hoverBackground); }
-.tab.is-active { color: var(--vscode-foreground); border-bottom-color: var(--vscode-focusBorder); }
+.tab:hover { color: var(--vscode-foreground); }
+.tab.is-active { color: var(--vscode-foreground); border-bottom-color: var(--gd-accent); }
 .badge {
-  font-size: 10px; padding: 0 5px; border-radius: 8px;
+  font-size: 10px; font-weight: 600; min-width: 16px; padding: 1px 5px; border-radius: 9px;
   background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
 }
-.tabpane { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.tabpane { flex: 1 1 auto; min-height: 0; }
+/* Changes: one scroll for the whole pane; the commit box sticks to the bottom
+   but is still reachable by scrolling when the panel is very short. */
+#pane-changes { display: block; overflow-y: auto; overflow-x: hidden; }
+#pane-history { display: flex; flex-direction: column; overflow: hidden; }
 
 /* ---- changed files ---- */
-#filterWrap { flex: 0 0 auto; padding: 6px; }
+#filterWrap { flex: 0 0 auto; padding: 8px 10px 4px; }
 #filter {
-  width: 100%; padding: 3px 7px; border-radius: 2px; font-size: 12px;
+  width: 100%; padding: 5px 8px; border-radius: var(--gd-radius); font-size: 12px;
   background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border, transparent);
+  border: 1px solid var(--vscode-input-border, var(--gd-border));
 }
-#filter:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
+#filter:focus { outline: 0; border-color: var(--vscode-focusBorder); }
 #allRow {
-  flex: 0 0 auto; display: flex; align-items: center; gap: 7px;
-  padding: 3px 8px; font-size: 11px; color: var(--vscode-descriptionForeground);
-  border-bottom: 1px solid var(--vscode-panel-border); cursor: pointer;
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; font-size: 11px; color: var(--vscode-descriptionForeground);
+  cursor: pointer;
 }
-#fileList { flex: 1 1 0; overflow: auto; min-height: 44px; }
+#allRow input, .file-row input[type=checkbox] { width: 13px; height: 13px; accent-color: var(--gd-accent); cursor: pointer; }
+#fileList { min-height: 0; }
 .file-row {
-  display: flex; align-items: center; gap: 7px; padding: 2px 8px; cursor: pointer;
-  white-space: nowrap;
+  display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; cursor: pointer;
+  white-space: nowrap; font-size: 12px;
 }
 .file-row:hover { background: var(--vscode-list-hoverBackground); }
-.file-row.is-selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+.file-row.is-selected { background: var(--vscode-list-inactiveSelectionBackground); }
 .file-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
-.file-dir { opacity: .6; }
+.file-dir { opacity: .55; }
 .status-sq {
-  flex: 0 0 auto; width: 14px; height: 14px; border-radius: 2px;
+  flex: 0 0 auto; width: 16px; height: 16px; border-radius: 3px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 9px; font-weight: 700; line-height: 1;
-  border: 1px solid currentColor;
+  font-size: 10px; font-weight: 700; line-height: 1; color: #fff;
 }
-.st-M { color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); }
-.st-A, .st-U { color: var(--vscode-gitDecoration-untrackedResourceForeground, #73c991); }
-.st-D { color: var(--vscode-gitDecoration-deletedResourceForeground, #f14c4c); }
-.st-R { color: var(--vscode-gitDecoration-renamedResourceForeground, #73c991); }
-.st-C { color: var(--vscode-gitDecoration-conflictingResourceForeground, #e4676b); }
+.st-M { background: var(--vscode-gitDecoration-modifiedResourceForeground, #d0a215); }
+.st-A, .st-U { background: var(--vscode-gitDecoration-untrackedResourceForeground, #2ea043); }
+.st-D { background: var(--vscode-gitDecoration-deletedResourceForeground, #d73a49); }
+.st-R { background: var(--vscode-gitDecoration-renamedResourceForeground, #8250df); }
+.st-C { background: var(--vscode-gitDecoration-conflictingResourceForeground, #e4676b); }
 .file-x {
-  flex: 0 0 auto; opacity: 0; padding: 0 2px; border: 0; background: transparent;
-  cursor: pointer; color: inherit; font-size: 13px;
+  flex: 0 0 auto; opacity: 0; width: 18px; height: 18px; border: 0; border-radius: 4px;
+  background: transparent; cursor: pointer; color: inherit; font-size: 14px; line-height: 1;
 }
-.file-row:hover .file-x { opacity: .7; }
-.file-x:hover { opacity: 1; }
+.file-row:hover .file-x { opacity: .6; }
+.file-x:hover { opacity: 1; background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.2)); }
 
 /* ---- commit box ---- */
 #commitBox {
-  flex: 0 0 auto; padding: 6px; border-top: 1px solid var(--vscode-panel-border);
-  display: flex; flex-direction: column; gap: 5px;
-  background: var(--vscode-sideBar-background);
+  position: sticky; bottom: 0; z-index: 2;
+  padding: 8px; border-top: 1px solid var(--gd-border);
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--gd-chrome);
 }
-.commit-summary { display: flex; align-items: center; gap: 6px; }
+.commit-summary { display: flex; align-items: center; gap: 8px; }
 .avatar {
-  flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; overflow: hidden;
+  flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 700; text-transform: uppercase;
-  background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  background: var(--gd-accent); color: var(--gd-accent-fg);
 }
 .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 #summary, #description {
-  width: 100%; padding: 4px 7px; border-radius: 2px; font-size: 12px;
+  width: 100%; padding: 6px 9px; border-radius: var(--gd-radius); font-size: 12px;
   background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border, transparent);
+  border: 1px solid var(--vscode-input-border, var(--gd-border));
 }
-#summary:focus, #description:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
-#description { resize: vertical; min-height: 30px; max-height: 140px; }
+#summary { font-weight: 600; }
+#summary:focus, #description:focus { outline: 0; border-color: var(--vscode-focusBorder); }
+#description { resize: vertical; min-height: 44px; max-height: 140px; }
 #commitBtn {
-  width: 100%; padding: 5px 10px; border: 0; border-radius: 2px; cursor: pointer; font-size: 12px;
-  background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+  width: 100%; padding: 8px 12px; border: 0; border-radius: var(--gd-radius); cursor: pointer;
+  font-size: 12px; font-weight: 600;
+  background: var(--gd-accent); color: var(--gd-accent-fg);
 }
-#commitBtn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
-#commitBtn:disabled { opacity: .5; cursor: default; }
+#commitBtn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, var(--gd-accent)); filter: brightness(1.08); }
+#commitBtn:disabled { opacity: .45; cursor: default; }
 #commitBtn strong { font-weight: 700; }
 
 /* ---- history ---- */
 #commitList { flex: 1 1 auto; overflow: auto; min-height: 0; }
 .commit-row {
-  display: flex; flex-direction: column; gap: 2px; padding: 7px 12px; cursor: pointer;
-  border-bottom: 1px solid var(--vscode-panel-border);
+  display: flex; flex-direction: column; gap: 3px; padding: 9px 12px; cursor: pointer;
+  border-bottom: 1px solid var(--gd-border);
 }
 .commit-row:hover { background: var(--vscode-list-hoverBackground); }
-.commit-row.is-selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
-.commit-msg { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-row.is-selected { background: var(--vscode-list-inactiveSelectionBackground); box-shadow: inset 2px 0 0 var(--gd-accent); }
+.commit-msg { font-weight: 500; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .commit-meta { font-size: 11px; color: var(--vscode-descriptionForeground); display: flex; align-items: center; gap: 6px; }
-.unpushed-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-charts-blue, #4daafc); flex: 0 0 auto; }
+.unpushed-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gd-accent); flex: 0 0 auto; }
 
 /* ---- diff ---- */
 #diffHeader {
-  flex: 0 0 auto; padding: 6px 12px; font-size: 12px;
-  background: var(--vscode-sideBar-background);
-  border-bottom: 1px solid var(--vscode-panel-border);
+  flex: 0 0 auto; padding: 9px 14px; font-size: 12px; font-weight: 600;
+  background: var(--gd-chrome);
+  border-bottom: 1px solid var(--gd-border);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 #diffBody {
   flex: 1 1 auto; overflow: auto; min-height: 0;
   background: var(--vscode-editor-background);
-  font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
-  font-size: var(--vscode-editor-font-size, 12px);
+  font-family: var(--vscode-editor-font-family, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: var(--vscode-editor-font-size, 12px); line-height: 1.5;
 }
 .diff-line { display: flex; white-space: pre; }
 .diff-gutter {
-  flex: 0 0 auto; width: 44px; padding: 0 6px; text-align: right;
+  flex: 0 0 auto; width: 46px; padding: 0 8px; text-align: right;
   color: var(--vscode-editorLineNumber-foreground); opacity: .6;
-  user-select: none; border-right: 1px solid var(--vscode-panel-border);
+  user-select: none;
 }
-.diff-text { flex: 1 1 auto; padding: 0 8px; }
-.diff-add { background: var(--vscode-diffEditor-insertedTextBackground, rgba(63,185,80,.15)); }
+.diff-text { flex: 1 1 auto; padding: 0 10px; }
+.diff-add { background: var(--vscode-diffEditor-insertedTextBackground, rgba(46,160,67,.15)); }
+.diff-add .diff-gutter { background: var(--vscode-diffEditor-insertedLineBackground, rgba(46,160,67,.1)); }
 .diff-del { background: var(--vscode-diffEditor-removedTextBackground, rgba(248,81,73,.15)); }
+.diff-del .diff-gutter { background: var(--vscode-diffEditor-removedLineBackground, rgba(248,81,73,.1)); }
 .diff-hunk { color: var(--vscode-descriptionForeground); background: var(--vscode-editor-inactiveSelectionBackground); }
 .diff-meta { color: var(--vscode-descriptionForeground); }
 
 /* ---- empty states ---- */
 .empty-block {
   flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; text-align: center; padding: 24px; gap: 6px;
+  justify-content: center; text-align: center; padding: 24px 20px; gap: 8px;
 }
-.empty-emoji { opacity: .5; }
-.empty-title { font-size: 14px; }
-.empty-sub { font-size: 12px; color: var(--vscode-descriptionForeground); max-width: 240px; }
+#noChanges { flex: 0 0 auto; padding: 28px 20px; }
+.empty-emoji { opacity: .3; }
+.empty-emoji svg { width: 32px; height: 32px; }
+.empty-title { font-size: 13px; font-weight: 400; color: var(--vscode-foreground); }
+.empty-sub { font-size: 11px; color: var(--vscode-descriptionForeground); max-width: 240px; line-height: 1.5; }
 
 /* ---- popup menu ---- */
 .menu {
-  position: fixed; z-index: 50; min-width: 220px; max-height: 60vh; overflow: auto;
-  background: var(--vscode-menu-background, var(--vscode-sideBar-background));
-  border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
-  border-radius: 4px; box-shadow: 0 4px 14px rgba(0,0,0,.4); padding: 4px;
+  position: fixed; z-index: 50; min-width: 240px; max-height: 66vh; overflow: auto;
+  background: var(--vscode-menu-background, var(--vscode-dropdown-background, var(--gd-chrome)));
+  border: 1px solid var(--vscode-menu-border, var(--gd-border));
+  border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.45); padding: 5px;
 }
 .menu input.menu-filter {
-  width: 100%; margin-bottom: 4px; padding: 4px 6px; border-radius: 2px;
+  width: 100%; margin-bottom: 4px; padding: 6px 8px; border-radius: var(--gd-radius);
   background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-  border: 1px solid var(--vscode-input-border, transparent);
+  border: 1px solid var(--vscode-input-border, var(--gd-border));
 }
+.menu input.menu-filter:focus { outline: 0; border-color: var(--vscode-focusBorder); }
 .menu-item {
-  display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 2px;
-  cursor: pointer; white-space: nowrap;
+  display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: var(--gd-radius);
+  cursor: pointer; white-space: nowrap; font-size: 12px;
 }
 .menu-item:hover { background: var(--vscode-list-hoverBackground); }
 .menu-item.is-current { color: var(--vscode-descriptionForeground); }
-.menu-sep { height: 1px; margin: 4px 0; background: var(--vscode-panel-border); }
-.menu-empty { padding: 6px 8px; color: var(--vscode-descriptionForeground); }
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 5px; }
-::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
+.menu-sep { height: 1px; margin: 5px 4px; background: var(--gd-border); }
+.menu-empty { padding: 7px 9px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.menu-item.is-danger { color: var(--vscode-errorForeground, #f14c4c); }
+.menu-btn {
+  flex: 1 1 0; padding: 6px 8px; border: 0; border-radius: var(--gd-radius); cursor: pointer; font-size: 11px; font-weight: 600;
+  background: var(--vscode-button-secondaryBackground, var(--gd-accent));
+  color: var(--vscode-button-secondaryForeground, var(--gd-accent-fg));
+}
+.menu-btn:hover { background: var(--vscode-button-hoverBackground); }
+.load-more {
+  width: 100%; padding: 9px; border: 0; background: transparent; cursor: pointer;
+  color: var(--vscode-textLink-foreground); font-size: 12px;
+}
+.load-more:hover:not(:disabled) { background: var(--vscode-list-hoverBackground); }
+#conflictBar {
+  flex: 0 0 auto; padding: 8px 12px; font-size: 11px; line-height: 1.45;
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--vscode-inputValidation-warningBackground, rgba(228,103,107,.15));
+  border-bottom: 1px solid var(--vscode-inputValidation-warningBorder, #e4676b);
+}
+#conflictActions { display: flex; gap: 6px; }
+#conflictActions button {
+  flex: 1 1 0; padding: 5px 8px; border: 0; border-radius: var(--gd-radius);
+  cursor: pointer; font-size: 11px; font-weight: 600;
+  background: var(--vscode-button-secondaryBackground, rgba(128,128,128,.25));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+}
+#conflictContinue { background: var(--gd-accent); color: var(--gd-accent-fg); }
+#conflictActions button:disabled { opacity: .45; cursor: default; }
+
+/* ---- commit meta (amend / co-authors) ---- */
+#commitMeta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#amendRow { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--vscode-descriptionForeground); cursor: pointer; }
+#amendRow input { width: 13px; height: 13px; accent-color: var(--gd-accent); }
+.linklike { border: 0; background: transparent; cursor: pointer; font-size: 11px; color: var(--vscode-textLink-foreground); padding: 0; }
+.linklike:hover { text-decoration: underline; }
+#coAuthors {
+  width: 100%; padding: 6px 9px; border-radius: var(--gd-radius); font-size: 12px;
+  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--gd-border));
+}
+#coAuthors:focus { outline: 0; border-color: var(--vscode-focusBorder); }
+
+/* ---- undo bar ---- */
+#undoBar {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 7px 12px; font-size: 11px;
+  background: var(--gd-chrome); border-bottom: 1px solid var(--gd-border);
+}
+#undoText { color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#undoBtn {
+  flex: 0 0 auto; padding: 4px 12px; border: 1px solid var(--gd-border); border-radius: var(--gd-radius);
+  background: transparent; color: var(--vscode-foreground); cursor: pointer; font-size: 11px; font-weight: 600;
+}
+#undoBtn:hover { background: var(--vscode-list-hoverBackground); }
+
+.file-row.is-conflict .file-name { color: var(--vscode-errorForeground, #f14c4c); }
+.file-resolve {
+  flex: 0 0 auto; padding: 1px 7px; border: 1px solid var(--gd-border); border-radius: 10px;
+  background: transparent; color: inherit; cursor: pointer; font-size: 10px;
+}
+.file-resolve:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.2)); }
 `;
 
 const SCRIPT = String.raw`
@@ -389,6 +483,15 @@ const state = {
   selectedPath: null,
   selectedCommit: null,
   filter: "",
+  hasMore: false,
+  loadingMore: false,
+  operation: null,
+  conflicted: [],
+  canUndo: false,
+  lastCommitSummary: null,
+  stashes: [],
+  amend: false,
+  coAuthors: "",
 };
 
 /* ---------- toolbar ---------- */
@@ -398,7 +501,7 @@ function renderToolbar() {
   $("commitBranch").textContent = state.currentBranch || "branch";
 
   const r = state.remote || {};
-  const ico = $("syncIco"), label = $("syncLabel"), sub = $("syncSub"), count = $("syncCount");
+  const ico = $("syncIco"), label = $("syncLabel"), count = $("syncCount"), cell = $("syncCell");
   const svg = { fetch: ${JSON.stringify(ICON.fetch)}, push: ${JSON.stringify(ICON.push)}, pull: ${JSON.stringify(ICON.pull)}, publish: ${JSON.stringify(ICON.publish)} };
   // Only claim "not published" when we positively know: a remote exists and
   // git reported no upstream. Anything uncertain (status not received yet)
@@ -410,11 +513,13 @@ function renderToolbar() {
 
   ico.innerHTML = svg[mode];
   count.hidden = true;
-  if (mode === "publish") { label.textContent = "Publish branch"; sub.textContent = "This branch is not on the remote yet"; }
+  const sub = $("syncSub");
+  if (mode === "publish") { label.textContent = "Publish branch"; sub.textContent = "This branch is not on GitHub yet"; }
   else if (mode === "pull") { label.textContent = "Pull origin"; sub.textContent = relFetched(r.lastFetched); count.hidden = false; count.textContent = "↓ " + r.behind; }
   else if (mode === "push") { label.textContent = "Push origin"; sub.textContent = relFetched(r.lastFetched); count.hidden = false; count.textContent = "↑ " + r.ahead; }
   else { label.textContent = "Fetch origin"; sub.textContent = relFetched(r.lastFetched); }
-  $("syncCell").dataset.mode = mode;
+  cell.title = sub.textContent;
+  cell.dataset.mode = mode;
 }
 function relFetched(d) {
   if (!d) return "Never fetched";
@@ -443,6 +548,7 @@ document.querySelectorAll(".tab").forEach((btn) => {
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b === btn));
     $("pane-changes").hidden = state.tab !== "changes";
     $("pane-history").hidden = state.tab !== "history";
+    renderUndoBar();
   };
 });
 
@@ -470,7 +576,9 @@ function renderChanges() {
   $("changesBadge").textContent = state.changes.length;
   $("noChanges").hidden = has;
   $("fileList").hidden = !has;
-  $("commitBox").hidden = !has;
+  // The commit box stays visible even with a clean tree so "Amend last commit"
+  // is reachable (GitHub Desktop behaviour).
+  $("commitBox").hidden = false;
   $("allRow").hidden = !has;
   $("filterWrap").hidden = !has;
 
@@ -483,23 +591,28 @@ function renderChanges() {
   for (const c of vis) {
     const parts = fileParts(c.path);
     const L = statusLetter(c.status);
+    const isConflict = state.conflicted.indexOf(c.path) >= 0;
     const row = document.createElement("div");
-    row.className = "file-row" + (state.selectedPath === c.path ? " is-selected" : "");
+    row.className = "file-row" + (state.selectedPath === c.path ? " is-selected" : "") + (isConflict ? " is-conflict" : "");
     row.innerHTML =
-      '<input type="checkbox" ' + (state.selectedFiles.has(c.path) ? "checked" : "") + '>' +
-      '<span class="status-sq st-' + L + '">' + L + '</span>' +
+      '<input type="checkbox" ' + (state.selectedFiles.has(c.path) ? "checked" : "") + (isConflict ? " disabled" : "") + '>' +
+      '<span class="status-sq st-' + (isConflict ? "C" : L) + '">' + (isConflict ? "C" : L) + '</span>' +
       '<span class="file-name"><span class="file-dir">' + esc(parts.dir) + '</span>' + esc(parts.name) + '</span>' +
-      '<button class="file-x" title="Discard changes" type="button">×</button>';
+      (isConflict
+        ? '<button class="file-resolve" type="button">Mark resolved</button>'
+        : '<button class="file-x" title="Discard changes" type="button">×</button>');
     const cb = row.querySelector("input");
     cb.onclick = (e) => {
       e.stopPropagation();
+      if (isConflict) return;
       if (cb.checked) state.selectedFiles.add(c.path); else state.selectedFiles.delete(c.path);
       renderChanges();
     };
-    row.querySelector(".file-x").onclick = (e) => {
-      e.stopPropagation();
-      post("discardFiles", { files: [c.path] });
-    };
+    if (isConflict) {
+      row.querySelector(".file-resolve").onclick = (e) => { e.stopPropagation(); post("markResolved", { files: [c.path] }); };
+    } else {
+      row.querySelector(".file-x").onclick = (e) => { e.stopPropagation(); post("discardFiles", { files: [c.path] }); };
+    }
     row.onclick = () => selectFile(c.path);
     list.appendChild(row);
   }
@@ -528,31 +641,85 @@ $("allCheck").onclick = () => {
 $("filter").oninput = (e) => { state.filter = e.target.value; renderChanges(); };
 
 /* ---------- commit ---------- */
+function coAuthorTrailers() {
+  const raw = state.coAuthors.trim();
+  if (!raw) return "";
+  const parts = raw.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  const lines = parts.map((p) => {
+    const m = p.match(/^(.*?)\s*<([^>]+)>$/);
+    if (m) return "Co-Authored-By: " + m[1].trim() + " <" + m[2].trim() + ">";
+    const h = p.replace(/^@/, "");
+    return "Co-Authored-By: " + h + " <" + h + "@users.noreply.github.com>";
+  });
+  return lines.length ? "\n\n" + lines.join("\n") : "";
+}
 function updateCommitBtn() {
-  const ok = state.selectedFiles.size > 0 && $("summary").value.trim().length > 0;
+  const n = state.selectedFiles.size;
+  const hasMsg = $("summary").value.trim().length > 0;
+  const ok = hasMsg && (state.amend || n > 0);
   const btn = $("commitBtn");
   btn.disabled = !ok;
-  const n = state.selectedFiles.size;
-  btn.innerHTML = "Commit " + (n > 0 ? n + " file" + (n === 1 ? "" : "s") + " " : "") +
-    "to <strong>" + esc(state.currentBranch || "branch") + "</strong>";
+  if (state.amend) {
+    btn.innerHTML = "Amend last commit" + (n > 0 ? " (+" + n + " file" + (n === 1 ? "" : "s") + ")" : "");
+  } else {
+    btn.innerHTML = "Commit " + (n > 0 ? n + " file" + (n === 1 ? "" : "s") + " " : "") +
+      "to <strong>" + esc(state.currentBranch || "branch") + "</strong>";
+  }
 }
 $("summary").oninput = updateCommitBtn;
 function doCommit() {
   const summary = $("summary").value.trim();
-  if (!summary || state.selectedFiles.size === 0) return;
+  const n = state.selectedFiles.size;
+  if (!summary || (!state.amend && n === 0)) return;
   const desc = $("description").value.trim();
-  const message = desc ? summary + "\n\n" + desc : summary;
-  post("commitFiles", { message: message, files: Array.from(state.selectedFiles) });
-  $("summary").value = ""; $("description").value = "";
-  state.selectedFiles.clear();
-  updateCommitBtn();
+  const message = summary + (desc ? "\n\n" + desc : "") + coAuthorTrailers();
+  const files = Array.from(state.selectedFiles);
+  post(state.amend ? "amendCommit" : "commitFiles", { message: message, files: files });
+  $("commitBtn").disabled = true;
+  // Inputs cleared only on the "commitSucceeded" ack.
 }
 $("commitBtn").onclick = doCommit;
-["summary", "description"].forEach((id) => {
+["summary", "description", "coAuthors"].forEach((id) => {
   $(id).addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
   });
 });
+$("coAuthors").oninput = (e) => { state.coAuthors = e.target.value; };
+$("coAuthToggle").onclick = () => {
+  const el = $("coAuthors");
+  el.hidden = !el.hidden;
+  $("coAuthToggle").textContent = el.hidden ? "Add co-authors" : "Hide co-authors";
+  if (!el.hidden) el.focus();
+};
+$("amendCheck").onchange = (e) => {
+  state.amend = e.target.checked;
+  if (state.amend && !$("summary").value.trim() && state.lastCommitSummary) {
+    $("summary").value = state.lastCommitSummary;
+  }
+  updateCommitBtn();
+};
+$("undoBtn").onclick = () => post("undoLastCommit");
+$("conflictAbort").onclick = () => post("abortOperation");
+$("conflictContinue").onclick = () => post("continueOperation");
+
+/* ---------- operation / undo bars ---------- */
+function renderOperation() {
+  const bar = $("conflictBar");
+  if (!state.operation) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const nc = state.conflicted.length;
+  $("conflictText").textContent = nc > 0
+    ? "⚠ " + state.operation + " paused — " + nc + " file(s) in conflict. Resolve each, then Continue."
+    : "✔ All conflicts resolved. Click Continue to finish the " + state.operation + ".";
+  $("conflictContinue").disabled = nc > 0;
+  if (state.operation) { state.tab = "changes"; $("pane-changes").hidden = false; $("pane-history").hidden = true;
+    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === "changes")); }
+}
+function renderUndoBar() {
+  const show = state.tab === "history" && !state.operation && state.canUndo && !!state.lastCommitSummary;
+  $("undoBar").hidden = !show;
+  if (show) $("undoText").textContent = 'Undo "' + (state.lastCommitSummary || "") + '"';
+}
 
 /* ---------- history ---------- */
 function renderHistory() {
@@ -572,7 +739,64 @@ function renderHistory() {
       renderHistory();
       post("openCommitDetail", { hash: c.hash });
     };
+    row.oncontextmenu = (e) => { e.preventDefault(); openCommitMenu(e.clientX, e.clientY, c); };
     list.appendChild(row);
+  }
+  if (state.hasMore) {
+    const more = document.createElement("button");
+    more.className = "load-more"; more.type = "button";
+    more.textContent = state.loadingMore ? "Loading…" : "Load more commits";
+    more.disabled = state.loadingMore;
+    more.onclick = loadMore;
+    list.appendChild(more);
+  }
+}
+function loadMore() {
+  if (state.loadingMore || !state.hasMore) return;
+  state.loadingMore = true;
+  renderHistory();
+  post("loadMoreCommits", { offset: state.history.length });
+}
+$("commitList").addEventListener("scroll", () => {
+  const el = $("commitList");
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) loadMore();
+});
+
+const COMMIT_MENU = [
+  ["checkout", "Checkout this commit"],
+  ["createBranch", "Create branch from commit…"],
+  ["createTag", "Create tag…"],
+  ["sep"],
+  ["cherryPick", "Cherry-pick to current branch"],
+  ["revert", "Revert this commit"],
+  ["reset", "Reset current branch to here"],
+  ["sep"],
+  ["copySha", "Copy SHA"],
+  ["viewOnGitHub", "View on GitHub"],
+];
+function openCommitMenu(x, y, commit) {
+  openMenuAt(x, y, (m) => {
+    for (const entry of COMMIT_MENU) {
+      if (entry[0] === "sep") { const s = document.createElement("div"); s.className = "menu-sep"; m.appendChild(s); continue; }
+      const it = document.createElement("div");
+      it.className = "menu-item" + (entry[0] === "reset" ? " is-danger" : "");
+      it.textContent = entry[1];
+      it.onclick = () => { closeMenu(); runCommitAction(entry[0], commit); };
+      m.appendChild(it);
+    }
+  });
+}
+function runCommitAction(action, commit) {
+  const h = commit.hash;
+  switch (action) {
+    case "checkout": post("checkoutCommit", { hash: h }); break;
+    case "createBranch": post("createBranchFromCommit", { hash: h }); break;
+    case "createTag": post("createTagFromCommit", { hash: h }); break;
+    case "cherryPick": post("cherryPickCommit", { hash: h }); break;
+    case "revert": post("revertCommit", { hash: h }); break;
+    case "reset": post("resetToCommit", { hash: h }); break;
+    case "copySha": navigator.clipboard && navigator.clipboard.writeText(h); break;
+    case "viewOnGitHub": post("viewCommitOnGitHub", { hash: h }); break;
   }
 }
 
@@ -628,9 +852,44 @@ function openMenu(anchor, build) {
   });
   setTimeout(() => document.addEventListener("mousedown", onDocDown, true), 0);
 }
+function openMenuAt(x, y, build) {
+  menu.innerHTML = ""; build(menu);
+  menu.hidden = false;
+  menu.style.visibility = "hidden";
+  requestAnimationFrame(() => {
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let nx = x, ny = y;
+    if (nx + mw > window.innerWidth - 8) nx = window.innerWidth - 8 - mw;
+    if (ny + mh > window.innerHeight - 8) ny = Math.max(8, window.innerHeight - 8 - mh);
+    menu.style.left = Math.max(8, nx) + "px";
+    menu.style.top = Math.max(8, ny) + "px";
+    menu.style.visibility = "";
+  });
+  setTimeout(() => document.addEventListener("mousedown", onDocDown, true), 0);
+}
 
 $("branchCell").onclick = () => {
   openMenu($("branchCell"), (m) => {
+    const mkAction = (label, fn) => {
+      const it = document.createElement("div");
+      it.className = "menu-item"; it.textContent = label;
+      it.onclick = () => { closeMenu(); fn(); };
+      m.appendChild(it);
+    };
+    mkAction("＋  New branch…", startNewBranch);
+    if (state.currentBranch) mkAction("⇡  Create pull request…", () => post("createPullRequest", { branch: state.currentBranch }));
+    if (state.changes.length > 0) mkAction("⇩  Stash all changes", () => post("stashPush", { message: "" }));
+    for (const s of state.stashes) {
+      const it = document.createElement("div");
+      it.className = "menu-item";
+      it.innerHTML = '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">↤ ' + esc(s.message || ("stash@{" + s.index + "}")) + '</span>' +
+        '<button class="file-resolve" data-a="pop">Pop</button><button class="file-resolve" data-a="drop">✕</button>';
+      it.querySelector('[data-a=pop]').onclick = (e) => { e.stopPropagation(); closeMenu(); post("stashApply", { index: s.index, drop: true }); };
+      it.querySelector('[data-a=drop]').onclick = (e) => { e.stopPropagation(); closeMenu(); post("stashDrop", { index: s.index }); };
+      m.appendChild(it);
+    }
+    const sep = document.createElement("div"); sep.className = "menu-sep"; m.appendChild(sep);
+
     const filter = document.createElement("input");
     filter.className = "menu-filter"; filter.placeholder = "Find a branch…";
     m.appendChild(filter);
@@ -653,6 +912,38 @@ $("branchCell").onclick = () => {
     setTimeout(() => filter.focus(), 0);
   });
 };
+
+function startNewBranch() {
+  openMenu($("branchCell"), (m) => {
+    const input = document.createElement("input");
+    input.className = "menu-filter"; input.placeholder = "New branch name";
+    m.appendChild(input);
+    const dirty = state.changes.length > 0;
+    const hint = document.createElement("div");
+    hint.className = "menu-empty";
+    hint.textContent = dirty
+      ? "You have uncommitted changes — choose what to do:"
+      : "Press Enter to create from " + (state.currentBranch || "HEAD");
+    m.appendChild(hint);
+    const submit = (bringChanges) => {
+      const name = input.value.trim();
+      if (!name) return;
+      closeMenu();
+      if (dirty) post("createBranchWithChanges", { branchName: name, bringChanges: bringChanges });
+      else post("createBranch", { branchName: name });
+    };
+    if (dirty) {
+      const row = document.createElement("div"); row.style.display = "flex"; row.style.gap = "4px"; row.style.padding = "4px";
+      const a = document.createElement("button"); a.className = "menu-btn"; a.type = "button"; a.textContent = "Bring changes";
+      a.onclick = () => submit(true);
+      const b = document.createElement("button"); b.className = "menu-btn"; b.type = "button"; b.textContent = "Stash them";
+      b.onclick = () => submit(false);
+      row.appendChild(a); row.appendChild(b); m.appendChild(row);
+    }
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(true); } });
+    setTimeout(() => input.focus(), 0);
+  });
+}
 
 $("repoCell").onclick = () => {
   openMenu($("repoCell"), (m) => {
@@ -683,13 +974,48 @@ window.addEventListener("message", (ev) => {
         state.selectedPath = null;
         $("diffHeader").hidden = true;
       }
+      if (!state.changes.some((c) => /[UC]/.test(c.status || ""))) $("conflictBar").hidden = true;
       renderChanges();
       updateLayout();
       break;
     }
     case "updateHistory":
       state.history = msg.history || [];
+      state.hasMore = !!msg.hasMoreCommits;
+      state.loadingMore = false;
       renderHistory();
+      break;
+    case "loadMoreCommitsResponse": {
+      const seen = new Set(state.history.map((c) => c.hash));
+      state.history = state.history.concat((msg.history || []).filter((c) => !seen.has(c.hash)));
+      state.hasMore = !!msg.hasMoreCommits;
+      state.loadingMore = false;
+      renderHistory();
+      break;
+    }
+    case "commitSucceeded":
+      $("summary").value = ""; $("description").value = ""; $("coAuthors").value = "";
+      state.coAuthors = "";
+      state.selectedFiles.clear();
+      state.amend = false; $("amendCheck").checked = false;
+      updateCommitBtn();
+      break;
+    case "mergeConflict":
+      // Detailed state arrives via updateOperation on the following refresh;
+      // this just flips to the Changes tab immediately.
+      state.tab = "changes";
+      $("pane-changes").hidden = false; $("pane-history").hidden = true;
+      document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === "changes"));
+      break;
+    case "updateOperation":
+      state.operation = msg.operation || null;
+      state.conflicted = msg.conflicted || [];
+      state.canUndo = !!msg.canUndo;
+      state.lastCommitSummary = msg.lastCommitSummary || null;
+      renderOperation(); renderChanges(); renderUndoBar();
+      break;
+    case "updateStashes":
+      state.stashes = msg.stashes || [];
       break;
     case "updateBranches":
       state.branches = msg.branches || [];
@@ -736,6 +1062,8 @@ function setAvatar() {
 }
 setAvatar();
 renderToolbar();
+renderOperation();
+renderUndoBar();
 updateLayout();
 post("ready");
 `;

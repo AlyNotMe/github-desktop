@@ -1,11 +1,17 @@
 import * as vscode from "vscode";
 
+/**
+ * @description One entry in the Changes tab: a path and its git status code.
+ */
 export interface ChangeEntry {
   path: string;
   status: string;
   staged?: boolean;
 }
 
+/**
+ * @description One row of the History tab.
+ */
 export interface CommitEntry {
   hash: string;
   shortHash: string;
@@ -15,9 +21,13 @@ export interface CommitEntry {
   relativeTime: string;
   committedAt: string;
   tags?: string[];
+  /** `false` when the commit is known to be ahead of the upstream. */
   isPushed?: boolean;
 }
 
+/**
+ * @description Aggregate detail of a single commit shown in the diff pane.
+ */
 export interface CommitDetail {
   summary: CommitEntry & {
     additions: number;
@@ -32,25 +42,9 @@ export interface CommitDetail {
   }>;
 }
 
-export interface FileIconInfo {
-  iconClass?: string;
-  iconUri?: string;
-}
-
-export interface CommitDetailFile {
-  path: string;
-  status: string;
-  additions: number;
-  deletions: number;
-  iconClass?: string;
-  iconUri?: string;
-}
-
-export interface WebviewMessage {
-  command: string;
-  [key: string]: any;
-}
-
+/**
+ * @description Contract the extension host relies on to refresh the timeline.
+ */
 export interface ITimelineViewProvider extends vscode.WebviewViewProvider {
   refresh(): Promise<void>;
 }

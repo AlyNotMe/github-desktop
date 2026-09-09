@@ -1,22 +1,29 @@
 import * as vscode from "vscode";
 import { RepositoryManager } from "../../core/repositories/repository-manager";
 import { AccountManager } from "../../core/accounts/account-manager";
+import { AccountGitClientFactory } from "../../core/git/git-authenticator";
 import { CommitDetailViewProvider } from "../commitDetail/commit-detail-view-provider";
+import { ITimelineViewProvider } from "./interfaces/timeline-view-provider.interface";
 import {
-  ITimelineViewProvider,
-  WebviewMessage,
-} from "./interfaces/timeline-view-provider.interface";
-import { GitOperationsService } from "./services/git-operations.service";
+  VsCodeBrowser,
+  VsCodeNotifier,
+  VsCodeWebviewChannel,
+  WorkspaceRepositoryContext,
+} from "./adapters/vscode-adapters";
+import { TimelineController } from "./timeline-controller";
 import { WebviewHtmlService } from "./services/webview-html.service";
-import { MessageHandlerService } from "./services/message-handler.service";
-import { FileIconService } from "./services/file-icon.service";
 
+const REFRESH_DEBOUNCE_MS = 400;
+
+/**
+ * @description Binds the timeline webview to a {@link TimelineController}.
+ * Owns only VS Code lifecycle concerns: HTML, message plumbing, visibility and
+ * a debounced refresh so a burst of file saves triggers one recompute.
+ */
 export class TimelineViewProvider implements ITimelineViewProvider {
-  private view: vscode.WebviewView | undefined;
-  private gitService: GitOperationsService;
-  private htmlService: WebviewHtmlService;
-  private messageHandler: MessageHandlerService | undefined;
-  private fileIconService: FileIconService;
+  private controller: TimelineController | undefined;
+  private readonly htmlService: WebviewHtmlService;
+  private refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -24,76 +31,52 @@ export class TimelineViewProvider implements ITimelineViewProvider {
     private readonly accounts: AccountManager,
     private readonly commitDetailProvider: CommitDetailViewProvider,
   ) {
-    this.gitService = new GitOperationsService(repositories);
     this.htmlService = new WebviewHtmlService(context, repositories);
-    this.fileIconService = new FileIconService();
   }
 
-  resolveWebviewView(webviewView: vscode.WebviewView): void | Thenable<void> {
-    this.view = webviewView;
-    this.setupWebview(webviewView);
-    this.setupMessageHandler();
-    this.setupEventHandlers(webviewView);
-    return this.refreshData();
-  }
-
-  async refresh(): Promise<void> {
-    if (this.view && this.messageHandler) {
-      await this.messageHandler.handleMessage({ command: "refresh" });
-    }
-  }
-
-  private setupWebview(webviewView: vscode.WebviewView): void {
+  resolveWebviewView(webviewView: vscode.WebviewView): void {
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [
-        vscode.Uri.joinPath(this.context.extensionUri, "out", "webview"),
-        vscode.Uri.joinPath(
-          this.context.extensionUri,
-          "out",
-          "webview",
-          "assets",
-        ),
         vscode.Uri.joinPath(this.context.extensionUri, "out"),
       ],
     };
     webviewView.webview.html = this.htmlService.generateHtml(
       webviewView.webview,
     );
-  }
 
-  private setupMessageHandler(): void {
-    if (!this.view) return;
+    this.controller = new TimelineController({
+      repos: new WorkspaceRepositoryContext(this.repositories),
+      notifier: new VsCodeNotifier(),
+      channel: new VsCodeWebviewChannel(webviewView.webview),
+      browser: new VsCodeBrowser(),
+      git: new AccountGitClientFactory(this.accounts),
+      accounts: this.accounts,
+      commitDetail: this.commitDetailProvider,
+    });
 
-    this.messageHandler = new MessageHandlerService(
-      this.context,
-      this.repositories,
-      this.accounts,
-      this.commitDetailProvider,
-      this.gitService,
-      this.view,
+    webviewView.webview.onDidReceiveMessage((message) =>
+      this.controller?.handle(message),
     );
-  }
-
-  private setupEventHandlers(webviewView: vscode.WebviewView): void {
-    // Handle webview becoming visible/hidden
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
-        this.refreshData();
+        void this.controller?.refresh();
       }
     });
 
-    // Handle messages from webview
-    webviewView.webview.onDidReceiveMessage(async (message: WebviewMessage) => {
-      if (this.messageHandler) {
-        await this.messageHandler.handleMessage(message);
-      }
-    });
+    void this.controller.refresh();
   }
 
-  private async refreshData(): Promise<void> {
-    if (this.messageHandler) {
-      await this.messageHandler.handleMessage({ command: "refresh" });
+  /** Debounced: coalesces bursts (e.g. save-all) into a single recompute. */
+  refresh(): Promise<void> {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
     }
+    return new Promise((resolve) => {
+      this.refreshTimer = setTimeout(() => {
+        this.refreshTimer = undefined;
+        void this.controller?.refresh().finally(resolve);
+      }, REFRESH_DEBOUNCE_MS);
+    });
   }
 }
