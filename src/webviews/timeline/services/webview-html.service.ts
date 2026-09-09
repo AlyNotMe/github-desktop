@@ -393,18 +393,26 @@ body.narrow #right { display: none; }
   font-family: var(--vscode-editor-font-family, ui-monospace, "SF Mono", Menlo, monospace);
   font-size: var(--vscode-editor-font-size, 12px); line-height: 1.5;
 }
-.diff-line { display: flex; white-space: pre; }
-.diff-gutter {
-  flex: 0 0 auto; width: 46px; padding: 0 8px; text-align: right;
-  color: var(--vscode-editorLineNumber-foreground); opacity: .6;
-  user-select: none;
+.dl { display: flex; white-space: pre; align-items: flex-start; }
+.dg {
+  flex: 0 0 auto; width: 40px; padding: 0 6px; text-align: right;
+  color: var(--vscode-editorLineNumber-foreground); opacity: .55;
+  user-select: none; font-variant-numeric: tabular-nums;
 }
-.diff-text { flex: 1 1 auto; padding: 0 10px; }
-.diff-add { background: var(--vscode-diffEditor-insertedTextBackground, rgba(46,160,67,.15)); }
-.diff-add .diff-gutter { background: var(--vscode-diffEditor-insertedLineBackground, rgba(46,160,67,.1)); }
-.diff-del { background: var(--vscode-diffEditor-removedTextBackground, rgba(248,81,73,.15)); }
-.diff-del .diff-gutter { background: var(--vscode-diffEditor-removedLineBackground, rgba(248,81,73,.1)); }
-.diff-hunk { color: var(--vscode-descriptionForeground); background: var(--vscode-editor-inactiveSelectionBackground); }
+.ds { flex: 0 0 auto; width: 16px; text-align: center; user-select: none; opacity: .6; }
+.dt { flex: 1 1 auto; padding: 0 10px 0 4px; white-space: pre-wrap; word-break: break-word; }
+.d-add { background: var(--vscode-diffEditor-insertedLineBackground, var(--vscode-diffEditor-insertedTextBackground, rgba(46,160,67,.12))); }
+.d-del { background: var(--vscode-diffEditor-removedLineBackground, var(--vscode-diffEditor-removedTextBackground, rgba(248,81,73,.12))); }
+.d-add .ds { color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043); opacity: 1; }
+.d-del .ds { color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149); opacity: 1; }
+.dw-add { background: var(--vscode-diffEditor-insertedTextBackground, rgba(46,160,67,.4)); border-radius: 2px; }
+.dw-del { background: var(--vscode-diffEditor-removedTextBackground, rgba(248,81,73,.4)); border-radius: 2px; }
+.dh {
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-editor-inactiveSelectionBackground, rgba(128,128,128,.12));
+  padding: 2px 10px; margin: 4px 0; font-size: 11px;
+}
+.dh .dt { padding: 0; white-space: pre; }
 .diff-meta { color: var(--vscode-descriptionForeground); }
 
 /* ---- commit detail ---- */
@@ -1073,33 +1081,92 @@ function renderCommitFileDiff(diff) {
 function renderDiff(text) {
   renderDiffInto($("diffBody"), text);
 }
+// Token-level LCS, used to highlight the exact words that changed between a
+// removed line and the added line that replaced it (like VS Code's diff editor).
+function wordDiff(a, b) {
+  const split = (s) => s.match(/\s+|\w+|[^\s\w]/g) || [];
+  const at = split(a), bt = split(b);
+  const n = at.length, m = bt.length;
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = at[i] === bt[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const aOut = [], bOut = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (at[i] === bt[j]) { aOut.push([0, at[i]]); bOut.push([0, bt[j]]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { aOut.push([-1, at[i]]); i++; }
+    else { bOut.push([1, bt[j]]); j++; }
+  }
+  while (i < n) aOut.push([-1, at[i++]]);
+  while (j < m) bOut.push([1, bt[j++]]);
+  return [aOut, bOut];
+}
+function paintTokens(tokens, changedCls) {
+  let html = "";
+  for (const [flag, tok] of tokens) {
+    html += flag === 0 ? esc(tok) : '<span class="' + changedCls + '">' + esc(tok) + "</span>";
+  }
+  return html;
+}
+
 function renderDiffInto(body, text) {
   if (!text || !text.trim()) {
     body.innerHTML = '<div class="diff-meta" style="padding:8px">No textual changes (binary file or whitespace only).</div>';
     return;
   }
-  const lines = text.split("\n");
-  let out = "";
+  const src = text.split("\n");
+  // Parse into typed rows first so we can pair adjacent -/+ runs for word diff.
+  const rows = [];
   let oldNo = 0, newNo = 0;
-  for (const raw of lines) {
-    let cls = "", gutter = "";
+  for (const raw of src) {
     if (raw.indexOf("@@") === 0) {
-      const m = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      const m = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/);
       if (m) { oldNo = +m[1]; newNo = +m[2]; }
-      cls = "diff-hunk";
-    } else if (/^(diff |index |--- |\+\+\+ |new file|deleted file|similarity |rename )/.test(raw)) {
-      cls = "diff-meta";
+      rows.push({ t: "hunk", text: m ? m[3].trim() || raw : raw });
+    } else if (/^(diff |index |--- |\+\+\+ |new file|deleted file|similarity |rename |Binary )/.test(raw)) {
+      continue; // file headers are shown in the pane header already
     } else if (raw.charAt(0) === "+") {
-      cls = "diff-add"; gutter = "+" + (newNo++);
+      rows.push({ t: "add", n: newNo++, text: raw.slice(1) });
     } else if (raw.charAt(0) === "-") {
-      cls = "diff-del"; gutter = "-" + (oldNo++);
+      rows.push({ t: "del", o: oldNo++, text: raw.slice(1) });
     } else {
-      gutter = String(newNo); oldNo++; newNo++;
+      rows.push({ t: "ctx", o: oldNo++, n: newNo++, text: raw.slice(1) });
     }
-    out += '<div class="diff-line ' + cls + '"><span class="diff-gutter">' + esc(gutter) +
-      '</span><span class="diff-text">' + esc(raw || " ") + "</span></div>";
   }
-  body.innerHTML = out;
+
+  let out = "";
+  const cell = (o, n, sign, cls, inner) =>
+    '<div class="dl ' + cls + '">' +
+    '<span class="dg">' + (o == null ? "" : o) + '</span>' +
+    '<span class="dg">' + (n == null ? "" : n) + '</span>' +
+    '<span class="ds">' + sign + '</span>' +
+    '<span class="dt">' + inner + '</span></div>';
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (r.t === "hunk") { out += '<div class="dl dh"><span class="dt">' + esc(r.text) + '</span></div>'; continue; }
+    if (r.t === "ctx") { out += cell(r.o + 1, r.n + 1, " ", "", esc(r.text) || " "); continue; }
+    if (r.t === "del") {
+      // collect the del run and the following add run
+      const dels = []; while (i < rows.length && rows[i].t === "del") dels.push(rows[i++]);
+      const adds = []; while (i < rows.length && rows[i].t === "add") adds.push(rows[i++]);
+      i--;
+      for (let k = 0; k < dels.length; k++) {
+        const d = dels[k], pair = adds[k];
+        const inner = pair ? paintTokens(wordDiff(d.text, pair.text)[0], "dw-del") : (esc(d.text) || " ");
+        out += cell(d.o + 1, null, "-", "d-del", inner);
+      }
+      for (let k = 0; k < adds.length; k++) {
+        const a = adds[k], pair = dels[k];
+        const inner = pair ? paintTokens(wordDiff(pair.text, a.text)[1], "dw-add") : (esc(a.text) || " ");
+        out += cell(null, a.n + 1, "+", "d-add", inner);
+      }
+      continue;
+    }
+    if (r.t === "add") { out += cell(null, r.n + 1, "+", "d-add", esc(r.text) || " "); continue; }
+  }
+  body.innerHTML = out || '<div class="diff-meta" style="padding:8px">No changes.</div>';
   body.scrollTop = 0;
 }
 
