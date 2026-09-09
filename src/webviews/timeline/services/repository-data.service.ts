@@ -69,7 +69,7 @@ export class RepositoryDataService {
       this.toCommitEntry(commit, index, remoteStatus),
     );
 
-    const branchList = this.listBranches(branch.all);
+    const branchList = await this.listBranches(git, branch.all, branch.current);
     const operation = await this.detectOperation(git);
     const canUndo = operation === null && (await this.hasParentCommit(git));
 
@@ -296,19 +296,74 @@ export class RepositoryDataService {
     };
   }
 
-  private listBranches(all: string[]): string[] {
-    // Local branches, plus remote-only branches by their short name. Never
-    // expose `remotes/<remote>/<name>` refs (checking one out detaches HEAD).
+  /**
+   * Local branches ordered most-recently-used first (current branch, then
+   * branches by last `git checkout` from the reflog, then the rest by last
+   * commit date), followed by remote-only branches. Never exposes
+   * `remotes/<remote>/<name>` refs — checking one out detaches HEAD.
+   */
+  private async listBranches(
+    git: ReturnType<GitClientFactory["plain"]>,
+    all: string[],
+    current: string | undefined,
+  ): Promise<string[]> {
     const local = all.filter((b) => !b.startsWith("remotes/"));
     const localSet = new Set(local);
-    const remoteOnly = new Set<string>();
+    const remoteOnly: string[] = [];
     for (const b of all) {
       const m = b.match(/^remotes\/[^/]+\/(.+)$/);
-      if (m && m[1] !== "HEAD" && !localSet.has(m[1])) {
-        remoteOnly.add(m[1]);
+      if (
+        m &&
+        m[1] !== "HEAD" &&
+        !localSet.has(m[1]) &&
+        !remoteOnly.includes(m[1])
+      ) {
+        remoteOnly.push(m[1]);
       }
     }
-    return [...local, ...remoteOnly];
+
+    // Base order: last commit date, newest first.
+    let ordered = local;
+    try {
+      const raw = await git.raw([
+        "for-each-ref",
+        "--sort=-committerdate",
+        "--format=%(refname:short)",
+        "refs/heads",
+      ]);
+      const byDate = raw
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      ordered = byDate.filter((b) => localSet.has(b));
+      for (const b of local) {
+        if (!ordered.includes(b)) {
+          ordered.push(b);
+        }
+      }
+    } catch {
+      // keep git.branch() order
+    }
+
+    // Bump branches to the front in reflog checkout order (true MRU).
+    try {
+      const reflog = await git.raw(["reflog", "--format=%gs", "-n", "400"]);
+      const mru: string[] = [];
+      for (const line of reflog.split("\n")) {
+        const m = line.match(/^checkout: moving from \S+ to (\S+)$/);
+        if (m && localSet.has(m[1]) && !mru.includes(m[1])) {
+          mru.push(m[1]);
+        }
+      }
+      ordered = [...mru, ...ordered.filter((b) => !mru.includes(b))];
+    } catch {
+      // reflog unavailable — date order stands
+    }
+
+    if (current && localSet.has(current)) {
+      ordered = [current, ...ordered.filter((b) => b !== current)];
+    }
+    return [...ordered, ...remoteOnly];
   }
 
   /** One `for-each-ref` call instead of one `git log` per branch. */
