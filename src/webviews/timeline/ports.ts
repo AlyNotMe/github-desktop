@@ -73,6 +73,36 @@ export interface Browser {
 }
 
 /**
+ * @description One open pull request, as shown in the branch dropdown's
+ * "Pull requests" tab.
+ */
+export interface PullRequestSummary {
+  number: number;
+  title: string;
+  author: string;
+  headRef: string;
+  baseRef: string;
+  isFork: boolean;
+  isDraft: boolean;
+  updatedAt: string;
+}
+
+/**
+ * @description Read-only GitHub REST access scoped to the active repository.
+ * Backed by the account manager's authenticated Octokit; kept behind a port so
+ * services stay free of `@octokit/*` and are mockable in tests.
+ */
+export interface GitHubApi {
+  /**
+   * Lists open pull requests for `repo`, most-recently-updated first.
+   *
+   * @throws when no GitHub account is signed in or the repo has no
+   *   `owner`/`name` resolvable to a GitHub slug.
+   */
+  listPullRequests(repo: TrackedRepository): Promise<PullRequestSummary[]>;
+}
+
+/**
  * @description Triggers a full recompute-and-broadcast of the timeline state.
  * Mutating services call this after a successful operation instead of pushing
  * partial updates themselves.

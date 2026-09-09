@@ -5,6 +5,7 @@ import { RemoteStatus } from "./interfaces/repository-snapshot";
 import { MessageRouter } from "./message-router";
 import {
   Browser,
+  GitHubApi,
   Notifier,
   RepositoryContext,
   Refresher,
@@ -48,6 +49,7 @@ export class TimelineController implements Refresher {
       browser: Browser;
       git: GitClientFactory;
       accounts: AccountManager;
+      githubApi: GitHubApi;
     },
   ) {
     const { repos, notifier, channel, browser, git } = deps;
@@ -64,7 +66,15 @@ export class TimelineController implements Refresher {
       browser,
       this,
     );
-    const pr = new PullRequestService(repos, notifier, browser);
+    const pr = new PullRequestService(
+      repos,
+      notifier,
+      browser,
+      git,
+      channel,
+      deps.githubApi,
+      this,
+    );
     const diff = new DiffService(repos, notifier, git, this.data, channel);
     const conflict = new ConflictService(repos, notifier, git, this);
     const stash = new StashService(repos, notifier, git, this);
@@ -111,6 +121,8 @@ export class TimelineController implements Refresher {
       .on("mergeBranch", (m) => branch.merge(m.fromBranch, m.toBranch))
       .on("compareBranch", (m) => branch.compare(m.branch))
       .on("createPullRequest", (m) => pr.openCompare(m.branch))
+      .on("getPullRequests", () => pr.list())
+      .on("checkoutPullRequest", (m) => pr.checkout(m.number))
       .on("openRepoOnGitHub", () => pr.openRepo())
       .on("loadMoreCommits", (m) => this.loadMore(m.offset))
       .on("getCommitDetails", (m) => diff.commitDetail(m.hash))

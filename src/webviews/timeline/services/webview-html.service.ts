@@ -480,6 +480,14 @@ body:not(.narrow) #noChanges { display: none !important; }
 .menu-item:hover { background: var(--vscode-list-hoverBackground); }
 .menu-item.is-current { color: var(--vscode-descriptionForeground); }
 .menu-sep { height: 1px; margin: 5px 4px; background: var(--gd-border); }
+.menu-tabs { display: flex; gap: 4px; margin-bottom: 5px; }
+.menu-tab {
+  flex: 1 1 0; padding: 5px 6px; border: 0; border-radius: var(--gd-radius); cursor: pointer;
+  font-size: 11px; font-weight: 600; background: transparent;
+  color: var(--vscode-descriptionForeground);
+}
+.menu-tab:hover { background: var(--vscode-list-hoverBackground); }
+.menu-tab.is-active { background: var(--gd-accent); color: var(--gd-accent-fg); }
 .menu-empty { padding: 7px 9px; color: var(--vscode-descriptionForeground); font-size: 12px; }
 .menu-item.is-danger { color: var(--vscode-errorForeground, #f14c4c); }
 .menu-btn {
@@ -599,6 +607,10 @@ const state = {
   amend: false,
   coAuthors: "",
   compare: null,
+  prMenuTab: "branches",
+  pullRequests: null,
+  prError: null,
+  prLoading: false,
 };
 
 /* ---------- toolbar ---------- */
@@ -1172,7 +1184,8 @@ function renderDiffInto(body, text) {
 
 /* ---------- dropdown menus ---------- */
 const menu = $("menu");
-function closeMenu() { menu.hidden = true; menu.innerHTML = ""; document.removeEventListener("mousedown", onDocDown, true); }
+let redrawBranchMenu = null;
+function closeMenu() { menu.hidden = true; menu.innerHTML = ""; document.removeEventListener("mousedown", onDocDown, true); redrawBranchMenu = null; }
 function onDocDown(e) { if (!menu.contains(e.target)) closeMenu(); }
 function openMenu(anchor, build) {
   menu.innerHTML = ""; build(menu);
@@ -1208,6 +1221,34 @@ function openMenuAt(x, y, build) {
 
 $("branchCell").onclick = () => {
   openMenu($("branchCell"), (m) => {
+    const tabs = document.createElement("div");
+    tabs.className = "menu-tabs";
+    const mkTab = (id, label) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = label;
+      b.className = "menu-tab" + (state.prMenuTab === id ? " is-active" : "");
+      b.onclick = () => {
+        state.prMenuTab = id;
+        if (id === "prs") { state.prLoading = true; state.prError = null; post("getPullRequests"); }
+        rebuild();
+      };
+      tabs.appendChild(b);
+    };
+    mkTab("branches", "Branches");
+    mkTab("prs", "Pull requests");
+
+    const rebuild = () => { closeMenu(); $("branchCell").onclick(); };
+    redrawBranchMenu = () => {
+      if (state.prMenuTab === "prs") { closeMenu(); $("branchCell").onclick(); }
+    };
+
+    m.appendChild(tabs);
+
+    if (state.prMenuTab === "prs") {
+      renderPrMenu(m);
+      return;
+    }
+
     const mkAction = (label, fn) => {
       const it = document.createElement("div");
       it.className = "menu-item"; it.textContent = label;
@@ -1258,6 +1299,49 @@ $("branchCell").onclick = () => {
     setTimeout(() => filter.focus(), 0);
   });
 };
+
+function renderPrMenu(m) {
+  if (state.prLoading && !state.pullRequests) {
+    const d = document.createElement("div"); d.className = "menu-empty"; d.textContent = "Loading pull requests…";
+    m.appendChild(d); return;
+  }
+  if (state.prError) {
+    const d = document.createElement("div"); d.className = "menu-empty"; d.textContent = state.prError;
+    m.appendChild(d); return;
+  }
+  const prs = state.pullRequests || [];
+  if (!prs.length) {
+    const d = document.createElement("div"); d.className = "menu-empty"; d.textContent = "No open pull requests";
+    m.appendChild(d); return;
+  }
+  const filter = document.createElement("input");
+  filter.className = "menu-filter"; filter.placeholder = "Find a pull request…";
+  m.appendChild(filter);
+  const holder = document.createElement("div"); m.appendChild(holder);
+  const draw = () => {
+    const q = filter.value.trim().toLowerCase();
+    holder.innerHTML = "";
+    const items = prs.filter((p) => !q ||
+      ("#" + p.number).indexOf(q) >= 0 ||
+      p.title.toLowerCase().indexOf(q) >= 0 ||
+      (p.author || "").toLowerCase().indexOf(q) >= 0);
+    if (!items.length) { holder.innerHTML = '<div class="menu-empty">No matches</div>'; return; }
+    for (const p of items) {
+      const it = document.createElement("div");
+      it.className = "menu-item";
+      it.innerHTML =
+        '<span style="flex:1;min-width:0">' +
+        '<span style="display:block;overflow:hidden;text-overflow:ellipsis">#' + p.number + '  ' + esc(p.title) +
+        (p.isDraft ? ' <span style="opacity:.5">(draft)</span>' : '') + '</span>' +
+        '<span style="display:block;font-size:10px;opacity:.55;overflow:hidden;text-overflow:ellipsis">by ' +
+        esc(p.author || "?") + (p.isFork ? " · fork" : "") + " · " + esc(p.headRef) + '</span></span>';
+      it.onclick = () => { closeMenu(); post("checkoutPullRequest", { number: p.number }); };
+      holder.appendChild(it);
+    }
+  };
+  filter.oninput = draw; draw();
+  setTimeout(() => filter.focus(), 0);
+}
 
 function startNewBranch() {
   openMenu($("branchCell"), (m) => {
@@ -1403,6 +1487,12 @@ window.addEventListener("message", (ev) => {
       break;
     case "updateStashes":
       state.stashes = msg.stashes || [];
+      break;
+    case "updatePullRequests":
+      state.prLoading = false;
+      state.pullRequests = msg.pullRequests || [];
+      state.prError = msg.error || null;
+      if (redrawBranchMenu) redrawBranchMenu();
       break;
     case "branchComparison":
       state.compare = { branch: msg.branch, ahead: msg.ahead || [], behind: msg.behind || [] };

@@ -9,6 +9,7 @@ import {
   RepositorySummary,
   StashEntry,
 } from "./interfaces/repository-snapshot";
+import { PullRequestSummary } from "./ports";
 
 /* ------------------------------------------------------------------ *
  *  Inbound: webview -> extension
@@ -55,6 +56,8 @@ export type InboundMessage =
   | { command: "mergeBranch"; fromBranch: string; toBranch: string }
   | { command: "compareBranch"; branch: string }
   | { command: "createPullRequest"; branch: string }
+  | { command: "getPullRequests" }
+  | { command: "checkoutPullRequest"; number: number }
   | { command: "openRepoOnGitHub" }
   | { command: "loadMoreCommits"; offset: number }
   | { command: "getCommitDetails"; hash: string }
@@ -130,6 +133,11 @@ export type OutboundMessage =
       lastCommitSummary: string | null;
     }
   | { command: "updateStashes"; stashes: StashEntry[] }
+  | {
+      command: "updatePullRequests";
+      pullRequests: PullRequestSummary[];
+      error?: string;
+    }
   | { command: "workingDiff"; payload: { path: string; diff: string } }
   | { command: "fileDiff"; payload: { path: string; diff: string } }
   | { command: "commitDetail"; payload: CommitDetail }

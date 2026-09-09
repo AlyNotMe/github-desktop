@@ -4,6 +4,7 @@ import { AccountManager } from "../../core/accounts/account-manager";
 import { AccountGitClientFactory } from "../../core/git/git-authenticator";
 import { ITimelineViewProvider } from "./interfaces/timeline-view-provider.interface";
 import {
+  AccountGitHubApi,
   VsCodeBrowser,
   VsCodeNotifier,
   VsCodeWebviewChannel,
@@ -50,6 +51,7 @@ export class TimelineViewProvider implements ITimelineViewProvider {
       browser: new VsCodeBrowser(),
       git: new AccountGitClientFactory(this.accounts),
       accounts: this.accounts,
+      githubApi: new AccountGitHubApi(this.accounts),
     });
 
     webviewView.webview.onDidReceiveMessage((message) =>

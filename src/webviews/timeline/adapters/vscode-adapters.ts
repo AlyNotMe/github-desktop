@@ -3,10 +3,19 @@ import { promises as fs } from "fs";
 import * as vscode from "vscode";
 import simpleGit from "simple-git";
 import { RepositoryManager } from "../../../core/repositories/repository-manager";
+import { AccountManager } from "../../../core/accounts/account-manager";
 import { getPrimaryRepository } from "../../../shared/utils/repo-selection";
 import { TrackedRepository } from "../../../shared/types";
+import { toGitHubWebUrl } from "../../../shared/utils/github-url";
 import { OutboundMessage } from "../messages";
-import { Browser, Notifier, RepositoryContext, WebviewChannel } from "../ports";
+import {
+  Browser,
+  GitHubApi,
+  Notifier,
+  PullRequestSummary,
+  RepositoryContext,
+  WebviewChannel,
+} from "../ports";
 
 /**
  * @description {@link RepositoryContext} backed by the extension's
@@ -162,5 +171,63 @@ export class VsCodeWebviewChannel implements WebviewChannel {
 
   post(message: OutboundMessage): void {
     void this.webview.postMessage(message);
+  }
+}
+
+/**
+ * @description Resolves a repository's `owner/name` GitHub slug, preferring the
+ * remote URL (authoritative) over the tracked fields (which fall back to the
+ * folder name for repos added without a GitHub remote).
+ */
+function gitHubSlug(
+  repo: TrackedRepository,
+): { owner: string; name: string } | null {
+  const web = toGitHubWebUrl(repo.remoteUrl);
+  const m = web?.match(/github\.com\/([^/]+)\/([^/]+?)$/);
+  if (m) {
+    return { owner: m[1], name: m[2] };
+  }
+  if (repo.owner && repo.owner !== "local" && repo.name) {
+    return { owner: repo.owner, name: repo.name };
+  }
+  return null;
+}
+
+/**
+ * @description {@link GitHubApi} backed by {@link AccountManager}'s
+ * authenticated Octokit.
+ */
+export class AccountGitHubApi implements GitHubApi {
+  constructor(private readonly accounts: AccountManager) {}
+
+  async listPullRequests(
+    repo: TrackedRepository,
+  ): Promise<PullRequestSummary[]> {
+    const slug = gitHubSlug(repo);
+    if (!slug) {
+      throw new Error("This repository has no GitHub remote.");
+    }
+    const octokit = await this.accounts.getOctokit(repo.accountId);
+    if (!octokit) {
+      throw new Error("Sign in to a GitHub account to see pull requests.");
+    }
+    const { data } = await octokit.rest.pulls.list({
+      owner: slug.owner,
+      repo: slug.name,
+      state: "open",
+      sort: "updated",
+      direction: "desc",
+      per_page: 50,
+    });
+    return data.map((pr) => ({
+      number: pr.number,
+      title: pr.title,
+      author: pr.user?.login ?? "",
+      headRef: pr.head.ref,
+      baseRef: pr.base.ref,
+      isFork: pr.head.repo?.fork ?? pr.head.repo?.full_name !== `${slug.owner}/${slug.name}`,
+      isDraft: pr.draft ?? false,
+      updatedAt: pr.updated_at,
+    }));
   }
 }
