@@ -74,9 +74,11 @@ export class TimelineController implements Refresher {
     this.router = new MessageRouter(notifier)
       .on("ready", () => this.refresh())
       .on("refresh", () => this.refresh())
-      .on("selectRepository", (m) => {
-        repos.setActive(m.path);
-        return this.refresh();
+      .on("selectRepository", async (m) => {
+        const reloading = await repos.setActive(m.path);
+        if (!reloading) {
+          await this.refresh();
+        }
       })
       .on("addLocalRepository", async () => {
         await repos.addLocal();

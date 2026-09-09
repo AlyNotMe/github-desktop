@@ -33,8 +33,21 @@ export class WorkspaceRepositoryContext implements RepositoryContext {
     return this.repositories.getRepositories();
   }
 
-  setActive(localPath: string): void {
+  async setActive(localPath: string): Promise<boolean> {
     this.activePath = localPath;
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    const alreadyOpen = folders.some(
+      (f) => path.resolve(f.uri.fsPath) === path.resolve(localPath),
+    );
+    if (alreadyOpen) {
+      return false;
+    }
+    await vscode.commands.executeCommand(
+      "vscode.openFolder",
+      vscode.Uri.file(localPath),
+      { forceNewWindow: false },
+    );
+    return true;
   }
 
   async addLocal(): Promise<void> {
@@ -75,7 +88,7 @@ export class WorkspaceRepositoryContext implements RepositoryContext {
       name,
       remoteUrl,
     });
-    this.setActive(folder);
+    await this.setActive(folder);
   }
 
   async clone(): Promise<void> {
