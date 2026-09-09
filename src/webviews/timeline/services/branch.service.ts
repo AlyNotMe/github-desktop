@@ -5,6 +5,7 @@ import {
   Refresher,
   WebviewChannel,
 } from "../ports";
+import { logRange } from "./commit-log";
 import { RepositoryScopedService } from "./repository-scoped.service";
 
 /**
@@ -20,6 +21,30 @@ export class BranchService extends RepositoryScopedService {
     private readonly refresher: Refresher,
   ) {
     super(repos, notifier);
+  }
+
+  /**
+   * Compares `branch` against the current HEAD and pushes the result to the
+   * webview: commits HEAD has that `branch` lacks (`ahead`) and vice versa
+   * (`behind`).
+   */
+  compare(branch: string): Promise<void | undefined> {
+    return this.withRepo(async (repo) => {
+      if (!branch) {
+        return;
+      }
+      const git = this.git.plain(repo.localPath);
+      const [ahead, behind] = await Promise.all([
+        logRange(git, `${branch}..HEAD`),
+        logRange(git, `HEAD..${branch}`),
+      ]);
+      this.channel.post({
+        command: "branchComparison",
+        branch,
+        ahead,
+        behind,
+      });
+    });
   }
 
   checkout(branch: string): Promise<void | undefined> {

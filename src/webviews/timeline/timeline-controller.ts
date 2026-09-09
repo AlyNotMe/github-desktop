@@ -92,6 +92,7 @@ export class TimelineController implements Refresher {
       .on("fetch", () => sync.fetch())
       .on("pull", () => sync.pull())
       .on("push", () => sync.push())
+      .on("forcePush", () => sync.forcePush())
       .on("publish", () => sync.publish())
       .on("checkoutBranch", (m) => branch.checkout(m.branch))
       .on("createBranch", (m) => branch.create(m.branchName))
@@ -99,6 +100,7 @@ export class TimelineController implements Refresher {
         branch.createWithChanges(m.branchName, m.bringChanges),
       )
       .on("mergeBranch", (m) => branch.merge(m.fromBranch, m.toBranch))
+      .on("compareBranch", (m) => branch.compare(m.branch))
       .on("createPullRequest", (m) => pr.openCompare(m.branch))
       .on("loadMoreCommits", (m) => this.loadMore(m.offset))
       .on("openCommitDetail", (m) =>

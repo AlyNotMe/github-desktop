@@ -114,6 +114,10 @@ ${STYLES}
     </div>
 
     <div class="tabpane" id="pane-history" hidden>
+      <div id="compareBar" hidden>
+        <span id="compareText"></span>
+        <button id="compareExit" type="button">✕</button>
+      </div>
       <div id="undoBar" hidden>
         <span id="undoText">Undo last commit</span>
         <button id="undoBtn" type="button">Undo</button>
@@ -441,10 +445,19 @@ button, input, textarea { font: inherit; color: inherit; }
 #coAuthors:focus { outline: 0; border-color: var(--vscode-focusBorder); }
 
 /* ---- undo bar ---- */
-#undoBar {
+#undoBar, #compareBar {
   flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
   gap: 8px; padding: 7px 12px; font-size: 11px;
   background: var(--gd-chrome); border-bottom: 1px solid var(--gd-border);
+}
+#compareBar { background: var(--vscode-list-inactiveSelectionBackground, var(--gd-chrome)); }
+#compareText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#compareExit { flex: 0 0 auto; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 13px; opacity: .7; }
+#compareExit:hover { opacity: 1; }
+.compare-section {
+  padding: 6px 12px; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--vscode-descriptionForeground);
+  background: var(--gd-chrome); border-bottom: 1px solid var(--gd-border); position: sticky; top: 0;
 }
 #undoText { color: var(--vscode-descriptionForeground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #undoBtn {
@@ -492,6 +505,7 @@ const state = {
   stashes: [],
   amend: false,
   coAuthors: "",
+  compare: null,
 };
 
 /* ---------- toolbar ---------- */
@@ -508,19 +522,39 @@ function renderToolbar() {
   // defaults to Fetch rather than a misleading "Publish branch".
   let mode = "fetch";
   if (r.hasRemote === true && r.isPublished === false && r.ahead === 0 && r.behind === 0) mode = "publish";
+  else if (r.ahead > 0 && r.behind > 0) mode = "diverged";
   else if (r.behind > 0) mode = "pull";
   else if (r.ahead > 0) mode = "push";
 
-  ico.innerHTML = svg[mode];
+  ico.innerHTML = svg[mode === "diverged" ? "push" : mode];
   count.hidden = true;
   const sub = $("syncSub");
   if (mode === "publish") { label.textContent = "Publish branch"; sub.textContent = "This branch is not on GitHub yet"; }
+  else if (mode === "diverged") { label.textContent = "Diverged"; sub.textContent = "Local and origin differ — click for options"; count.hidden = false; count.textContent = "↑" + r.ahead + " ↓" + r.behind; }
   else if (mode === "pull") { label.textContent = "Pull origin"; sub.textContent = relFetched(r.lastFetched); count.hidden = false; count.textContent = "↓ " + r.behind; }
   else if (mode === "push") { label.textContent = "Push origin"; sub.textContent = relFetched(r.lastFetched); count.hidden = false; count.textContent = "↑ " + r.ahead; }
   else { label.textContent = "Fetch origin"; sub.textContent = relFetched(r.lastFetched); }
   cell.title = sub.textContent;
   cell.dataset.mode = mode;
 }
+const SYNC_MENU = [
+  ["fetch", "Fetch origin"],
+  ["pull", "Pull origin"],
+  ["push", "Push origin"],
+  ["forcePush", "Force-push origin (overwrite remote)"],
+];
+function openSyncMenu(x, y) {
+  openMenuAt(x, y, (m) => {
+    for (const [cmd, label] of SYNC_MENU) {
+      const it = document.createElement("div");
+      it.className = "menu-item" + (cmd === "forcePush" ? " is-danger" : "");
+      it.textContent = label;
+      it.onclick = () => { closeMenu(); post(cmd); };
+      m.appendChild(it);
+    }
+  });
+}
+$("syncCell").oncontextmenu = (e) => { e.preventDefault(); openSyncMenu(e.clientX, e.clientY); };
 function relFetched(d) {
   if (!d) return "Never fetched";
   const t = new Date(d).getTime();
@@ -533,8 +567,9 @@ function relFetched(d) {
   return "Last fetched " + Math.round(hrs / 24) + "d ago";
 }
 
-$("syncCell").onclick = () => {
+$("syncCell").onclick = (e) => {
   const mode = $("syncCell").dataset.mode;
+  if (mode === "diverged") { openSyncMenu(e.clientX, e.clientY); return; }
   if (mode === "publish") post("publish");
   else if (mode === "pull") post("pull");
   else if (mode === "push") post("push");
@@ -716,32 +751,54 @@ function renderOperation() {
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === "changes")); }
 }
 function renderUndoBar() {
-  const show = state.tab === "history" && !state.operation && state.canUndo && !!state.lastCommitSummary;
+  const show = state.tab === "history" && !state.compare && !state.operation && state.canUndo && !!state.lastCommitSummary;
   $("undoBar").hidden = !show;
   if (show) $("undoText").textContent = 'Undo "' + (state.lastCommitSummary || "") + '"';
 }
 
 /* ---------- history ---------- */
+function commitRow(c) {
+  const row = document.createElement("div");
+  row.className = "commit-row" + (state.selectedCommit === c.hash ? " is-selected" : "");
+  row.innerHTML =
+    '<div class="commit-msg">' + esc((c.message || "").split("\n")[0]) + "</div>" +
+    '<div class="commit-meta">' + (c.isPushed === false ? '<span class="unpushed-dot"></span>' : "") +
+    esc(c.authorName || c.author || "") + " · " + esc(c.relativeTime || "") + "</div>";
+  row.onclick = () => {
+    state.selectedCommit = c.hash;
+    state.selectedPath = null;
+    renderHistory();
+    post("openCommitDetail", { hash: c.hash });
+  };
+  row.oncontextmenu = (e) => { e.preventDefault(); openCommitMenu(e.clientX, e.clientY, c); };
+  return row;
+}
 function renderHistory() {
   const list = $("commitList");
-  $("noHistory").hidden = state.history.length > 0;
   list.innerHTML = "";
-  for (const c of state.history) {
-    const row = document.createElement("div");
-    row.className = "commit-row" + (state.selectedCommit === c.hash ? " is-selected" : "");
-    row.innerHTML =
-      '<div class="commit-msg">' + esc((c.message || "").split("\n")[0]) + "</div>" +
-      '<div class="commit-meta">' + (c.isPushed === false ? '<span class="unpushed-dot"></span>' : "") +
-      esc(c.authorName || c.author || "") + " · " + esc(c.relativeTime || "") + "</div>";
-    row.onclick = () => {
-      state.selectedCommit = c.hash;
-      state.selectedPath = null;
-      renderHistory();
-      post("openCommitDetail", { hash: c.hash });
+
+  if (state.compare) {
+    $("compareBar").hidden = false;
+    $("compareText").textContent = "Comparing " + (state.currentBranch || "HEAD") + " ⇄ " + state.compare.branch;
+    $("noHistory").hidden = true;
+    const section = (title, commits) => {
+      const h = document.createElement("div");
+      h.className = "compare-section";
+      h.textContent = title + " (" + commits.length + ")";
+      list.appendChild(h);
+      if (!commits.length) {
+        const e = document.createElement("div"); e.className = "menu-empty"; e.textContent = "none"; list.appendChild(e);
+      }
+      for (const c of commits) list.appendChild(commitRow(c));
     };
-    row.oncontextmenu = (e) => { e.preventDefault(); openCommitMenu(e.clientX, e.clientY, c); };
-    list.appendChild(row);
+    section("On " + (state.currentBranch || "HEAD") + ", not on " + state.compare.branch, state.compare.ahead);
+    section("On " + state.compare.branch + ", not here", state.compare.behind);
+    return;
   }
+
+  $("compareBar").hidden = true;
+  $("noHistory").hidden = state.history.length > 0;
+  for (const c of state.history) list.appendChild(commitRow(c));
   if (state.hasMore) {
     const more = document.createElement("button");
     more.className = "load-more"; more.type = "button";
@@ -751,8 +808,9 @@ function renderHistory() {
     list.appendChild(more);
   }
 }
+$("compareExit").onclick = () => { state.compare = null; renderHistory(); renderUndoBar(); };
 function loadMore() {
-  if (state.loadingMore || !state.hasMore) return;
+  if (state.compare || state.loadingMore || !state.hasMore) return;
   state.loadingMore = true;
   renderHistory();
   post("loadMoreCommits", { offset: state.history.length });
@@ -902,9 +960,17 @@ $("branchCell").onclick = () => {
       if (!items.length) { holder.innerHTML = '<div class="menu-empty">No branches</div>'; return; }
       for (const b of items) {
         const it = document.createElement("div");
-        it.className = "menu-item" + (b === state.currentBranch ? " is-current" : "");
-        it.textContent = b + (b === state.currentBranch ? "  (current)" : "");
-        it.onclick = () => { closeMenu(); if (b !== state.currentBranch) post("checkoutBranch", { branch: b }); };
+        const isCur = b === state.currentBranch;
+        it.className = "menu-item" + (isCur ? " is-current" : "");
+        it.innerHTML = '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(b) + (isCur ? "  (current)" : "") + '</span>';
+        it.onclick = () => { closeMenu(); if (!isCur) post("checkoutBranch", { branch: b }); };
+        if (!isCur) {
+          const cmp = document.createElement("button");
+          cmp.className = "file-resolve"; cmp.type = "button"; cmp.textContent = "⇄";
+          cmp.title = "Compare with this branch";
+          cmp.onclick = (e) => { e.stopPropagation(); closeMenu(); post("compareBranch", { branch: b }); };
+          it.appendChild(cmp);
+        }
         holder.appendChild(it);
       }
     };
@@ -983,6 +1049,7 @@ window.addEventListener("message", (ev) => {
       state.history = msg.history || [];
       state.hasMore = !!msg.hasMoreCommits;
       state.loadingMore = false;
+      state.compare = null;
       renderHistory();
       break;
     case "loadMoreCommitsResponse": {
@@ -1016,6 +1083,13 @@ window.addEventListener("message", (ev) => {
       break;
     case "updateStashes":
       state.stashes = msg.stashes || [];
+      break;
+    case "branchComparison":
+      state.compare = { branch: msg.branch, ahead: msg.ahead || [], behind: msg.behind || [] };
+      state.tab = "history";
+      $("pane-changes").hidden = true; $("pane-history").hidden = false;
+      document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === "history"));
+      renderHistory(); renderUndoBar();
       break;
     case "updateBranches":
       state.branches = msg.branches || [];

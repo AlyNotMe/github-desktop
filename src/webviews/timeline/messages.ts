@@ -40,6 +40,7 @@ export type InboundMessage =
   | { command: "fetch" }
   | { command: "pull" }
   | { command: "push" }
+  | { command: "forcePush" }
   | { command: "publish" }
   | { command: "checkoutBranch"; branch: string }
   | { command: "createBranch"; branchName: string }
@@ -49,6 +50,7 @@ export type InboundMessage =
       bringChanges: boolean;
     }
   | { command: "mergeBranch"; fromBranch: string; toBranch: string }
+  | { command: "compareBranch"; branch: string }
   | { command: "createPullRequest"; branch: string }
   | { command: "loadMoreCommits"; offset: number }
   | { command: "openCommitDetail"; hash: string }
@@ -103,6 +105,12 @@ export type OutboundMessage =
       history: CommitEntry[];
       hasMoreCommits: boolean;
       offset: number;
+    }
+  | {
+      command: "branchComparison";
+      branch: string;
+      ahead: CommitEntry[];
+      behind: CommitEntry[];
     }
   | { command: "commitSucceeded" }
   | { command: "mergeConflict"; operation: string; files: string[] }

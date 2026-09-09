@@ -59,6 +59,34 @@ export class SyncService extends RepositoryScopedService {
     });
   }
 
+  /**
+   * Overwrites the upstream branch with the local one. Uses
+   * `--force-with-lease` so it still fails if someone else pushed in the
+   * meantime. Meant for after an amend / undo / reset that rewrote history.
+   */
+  forcePush(): Promise<void | undefined> {
+    return this.withRepo(async (repo) => {
+      const git = this.git.plain(repo.localPath);
+      const { current, tracking } = await git.status();
+      if (!tracking) {
+        this.notifier.warn("This branch has no upstream — use Publish instead");
+        return;
+      }
+      const ok = await this.notifier.confirm(
+        `Force-push ${current}? This overwrites the remote branch with your local history.`,
+        "Force push",
+      );
+      if (!ok) {
+        return;
+      }
+      await this.git.withAuth(repo.localPath, (g) =>
+        g.push(["--force-with-lease"]),
+      );
+      this.notifier.info("Force-pushed to remote");
+      await this.refresher.refresh();
+    });
+  }
+
   publish(): Promise<void | undefined> {
     return this.withRepo(async (repo) => {
       const git = this.git.plain(repo.localPath);

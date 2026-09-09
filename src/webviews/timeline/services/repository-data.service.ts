@@ -1,6 +1,11 @@
 import * as path from "path";
 import { GitClientFactory } from "../../../core/git/git-authenticator";
 import { RepositoryContext } from "../ports";
+import {
+  COMMIT_LOG_FORMAT,
+  formatRelativeTime,
+  parseCommitLogLine,
+} from "./commit-log";
 import { detectInProgressOperation } from "./git-operation-state";
 import {
   ChangeEntry,
@@ -113,30 +118,21 @@ export class RepositoryDataService {
       .plain(repo.localPath)
       .raw([
         "log",
-        "--format=%H%x09%an%x09%ae%x09%ad%x09%s",
+        `--format=${COMMIT_LOG_FORMAT}`,
         "--date=iso",
         `--max-count=${COMMITS_PAGE_SIZE}`,
         `--skip=${offset}`,
       ]);
 
     const commits = raw
-      .trim()
       .split("\n")
       .filter((line) => line.trim())
-      .map((line, index) => {
-        const [hash, author, email, date, ...rest] = line.split("\t");
-        return this.toCommitEntry(
-          {
-            hash,
-            author_name: author,
-            author_email: email,
-            date,
-            message: rest.join("\t"),
-          },
-          offset + index,
-          remoteStatus,
-        );
-      });
+      .map((line, index) => ({
+        ...parseCommitLogLine(line),
+        isPushed: remoteStatus.isPublished
+          ? offset + index >= remoteStatus.ahead
+          : false,
+      }));
 
     return {
       commits,
@@ -449,35 +445,4 @@ export class RepositoryDataService {
       remoteBranch,
     };
   }
-}
-
-/**
- * @description Formats a git date as a coarse "N minutes ago" string.
- *
- * @param input - Any date string git may emit (ISO, RFC 2822, epoch...)
- * @returns A relative phrase, or "unknown" when unparseable
- */
-export function formatRelativeTime(input: string): string {
-  const date = new Date(input);
-  if (Number.isNaN(date.getTime())) {
-    return "unknown";
-  }
-  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
-  const units: Array<[number, string]> = [
-    [60, "second"],
-    [60, "minute"],
-    [24, "hour"],
-    [30, "day"],
-    [12, "month"],
-    [Number.POSITIVE_INFINITY, "year"],
-  ];
-  let value = Math.max(seconds, 0);
-  for (const [size, name] of units) {
-    if (value < size) {
-      const rounded = Math.round(value);
-      return `${rounded} ${name}${rounded === 1 ? "" : "s"} ago`;
-    }
-    value /= size;
-  }
-  return "just now";
 }
