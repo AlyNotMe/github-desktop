@@ -57,7 +57,6 @@ export type InboundMessage =
   | { command: "createPullRequest"; branch: string }
   | { command: "openRepoOnGitHub" }
   | { command: "loadMoreCommits"; offset: number }
-  | { command: "openCommitDetail"; hash: string }
   | { command: "getCommitDetails"; hash: string }
   | { command: "getFileDiff"; hash: string; filePath: string }
   | { command: "selectCommit"; hash: string }

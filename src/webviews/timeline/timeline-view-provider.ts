@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import { RepositoryManager } from "../../core/repositories/repository-manager";
 import { AccountManager } from "../../core/accounts/account-manager";
 import { AccountGitClientFactory } from "../../core/git/git-authenticator";
-import { CommitDetailViewProvider } from "../commitDetail/commit-detail-view-provider";
 import { ITimelineViewProvider } from "./interfaces/timeline-view-provider.interface";
 import {
   VsCodeBrowser,
@@ -29,7 +28,6 @@ export class TimelineViewProvider implements ITimelineViewProvider {
     private readonly context: vscode.ExtensionContext,
     private readonly repositories: RepositoryManager,
     private readonly accounts: AccountManager,
-    private readonly commitDetailProvider: CommitDetailViewProvider,
   ) {
     this.htmlService = new WebviewHtmlService(context, repositories);
   }
@@ -52,7 +50,6 @@ export class TimelineViewProvider implements ITimelineViewProvider {
       browser: new VsCodeBrowser(),
       git: new AccountGitClientFactory(this.accounts),
       accounts: this.accounts,
-      commitDetail: this.commitDetailProvider,
     });
 
     webviewView.webview.onDidReceiveMessage((message) =>

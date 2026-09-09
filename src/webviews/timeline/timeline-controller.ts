@@ -1,6 +1,5 @@
 import { AccountManager } from "../../core/accounts/account-manager";
 import { GitClientFactory } from "../../core/git/git-authenticator";
-import { CommitDetailViewProvider } from "../commitDetail/commit-detail-view-provider";
 import { InboundMessage } from "./messages";
 import { RemoteStatus } from "./interfaces/repository-snapshot";
 import { MessageRouter } from "./message-router";
@@ -49,7 +48,6 @@ export class TimelineController implements Refresher {
       browser: Browser;
       git: GitClientFactory;
       accounts: AccountManager;
-      commitDetail: CommitDetailViewProvider;
     },
   ) {
     const { repos, notifier, channel, browser, git } = deps;
@@ -115,9 +113,6 @@ export class TimelineController implements Refresher {
       .on("createPullRequest", (m) => pr.openCompare(m.branch))
       .on("openRepoOnGitHub", () => pr.openRepo())
       .on("loadMoreCommits", (m) => this.loadMore(m.offset))
-      .on("openCommitDetail", (m) =>
-        deps.commitDetail.showCommitDetails(m.hash),
-      )
       .on("getCommitDetails", (m) => diff.commitDetail(m.hash))
       .on("selectCommit", (m) => diff.commitDetail(m.hash))
       .on("getFileDiff", (m) => diff.fileDiff(m.hash, m.filePath))

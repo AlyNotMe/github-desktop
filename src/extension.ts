@@ -8,7 +8,6 @@ import { RepositoryManager } from "./core/repositories/repository-manager";
 import { AccountsProvider } from "./ui/tree-views/accounts-provider";
 import { RepositoriesProvider } from "./ui/tree-views/repositories-provider";
 import { TimelineViewProvider } from "./webviews/timeline/timeline-view-provider";
-import { CommitDetailViewProvider } from "./webviews/commitDetail/commit-detail-view-provider";
 import { TrackedRepository } from "./shared/types";
 
 export async function activate(
@@ -30,15 +29,10 @@ export async function activate(
     repositoryManager,
     accountManager,
   );
-  const commitDetailProvider = new CommitDetailViewProvider(
-    context,
-    repositoryManager,
-  );
   const timelineProvider = new TimelineViewProvider(
     context,
     repositoryManager,
     accountManager,
-    commitDetailProvider,
   );
 
   const refreshAllViews = () => {

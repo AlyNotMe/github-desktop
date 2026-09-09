@@ -407,6 +407,37 @@ body.narrow #right { display: none; }
 .diff-hunk { color: var(--vscode-descriptionForeground); background: var(--vscode-editor-inactiveSelectionBackground); }
 .diff-meta { color: var(--vscode-descriptionForeground); }
 
+/* ---- commit detail ---- */
+.cd-head {
+  padding: 12px 16px; border-bottom: 1px solid var(--gd-border);
+  background: var(--gd-chrome); font-family: var(--vscode-font-family);
+}
+.cd-subject { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.cd-meta { font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 2px; }
+.cd-sha { font-family: var(--vscode-editor-font-family, monospace); }
+.cd-add { color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043); }
+.cd-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149); }
+.cd-files { font-family: var(--vscode-font-family); }
+.cd-file {
+  display: flex; align-items: center; gap: 8px; padding: 6px 16px; cursor: pointer;
+  border-bottom: 1px solid var(--gd-border); font-size: 12px;
+}
+.cd-file:hover { background: var(--vscode-list-hoverBackground); }
+.cd-file-path { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.cd-file-stat { flex: 0 0 auto; font-size: 11px; }
+.cd-back {
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  border-bottom: 1px solid var(--gd-border); background: var(--gd-chrome);
+}
+.cd-back button {
+  background: none; border: 0; color: var(--gd-accent); cursor: pointer;
+  font-size: 12px; padding: 0;
+}
+.cd-back-path {
+  font-size: 11px; color: var(--vscode-descriptionForeground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* ---- empty states ---- */
 .empty-block {
   flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
@@ -547,6 +578,8 @@ const state = {
   selectedFiles: new Set(),
   selectedPath: null,
   selectedCommit: null,
+  commitDetail: null,
+  commitFilePath: null,
   filter: "",
   hasMore: false,
   loadingMore: false,
@@ -635,6 +668,12 @@ document.querySelectorAll(".tab").forEach((btn) => {
     document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b === btn));
     $("pane-changes").hidden = state.tab !== "changes";
     $("pane-history").hidden = state.tab !== "history";
+    if (state.tab === "changes" && state.selectedCommit) {
+      state.selectedCommit = null;
+      state.commitDetail = null;
+      state.commitFilePath = null;
+    }
+    updateLayout();
     renderLastCommitBar();
   };
 });
@@ -711,6 +750,10 @@ function applyWidth() {
 window.addEventListener("resize", applyWidth);
 
 function updateLayout() {
+  if (state.selectedCommit) {
+    renderCommitDetail();
+    return;
+  }
   const hasDiff = !!state.selectedPath;
   const hasChanges = state.changes.length > 0;
   // Right pane: a file's diff > "pick a file" hint (when there are changes) >
@@ -868,8 +911,15 @@ function commitRow(c) {
   row.onclick = () => {
     state.selectedCommit = c.hash;
     state.selectedPath = null;
+    state.commitDetail = null;
+    state.commitFilePath = null;
     renderHistory();
-    post("openCommitDetail", { hash: c.hash });
+    $("diffHeader").hidden = false;
+    $("diffPath").textContent = (c.message || "").split("\n")[0];
+    $("rightEmpty").hidden = true;
+    $("diffBody").hidden = false;
+    $("diffBody").innerHTML = '<div class="diff-meta" style="padding:12px">Loading…</div>';
+    post("getCommitDetails", { hash: c.hash });
   };
   row.oncontextmenu = (e) => { e.preventDefault(); openCommitMenu(e.clientX, e.clientY, c); };
   return row;
@@ -959,9 +1009,71 @@ function runCommitAction(action, commit) {
   }
 }
 
+/* ---------- commit detail (right pane) ---------- */
+function exitCommitDetail() {
+  state.selectedCommit = null;
+  state.commitDetail = null;
+  state.commitFilePath = null;
+  renderHistory();
+  updateLayout();
+}
+function renderCommitDetail() {
+  $("rightEmpty").hidden = true;
+  $("diffHeader").hidden = false;
+  $("diffBody").hidden = false;
+  const d = state.commitDetail;
+  const s = d && d.summary;
+  $("diffPath").textContent = s ? (s.message || "").split("\n")[0] : "Commit";
+  if (!d) return;
+  if (state.commitFilePath) return; // a file diff is showing
+
+  const body = $("diffBody");
+  const stat =
+    '<span class="cd-add">+' + (s.additions || 0) + '</span> ' +
+    '<span class="cd-del">-' + (s.deletions || 0) + '</span> · ' +
+    (s.fileCount || d.files.length) + ' file' + ((s.fileCount || d.files.length) === 1 ? '' : 's');
+  let html =
+    '<div class="cd-head">' +
+    '<div class="cd-subject">' + esc((s.message || "").split("\n")[0]) + '</div>' +
+    '<div class="cd-meta">' + esc(s.authorName || "") + ' · ' + esc(s.relativeTime || "") +
+    ' · <span class="cd-sha">' + esc(s.shortHash || (s.hash || state.selectedCommit).slice(0, 7)) + '</span></div>' +
+    '<div class="cd-meta">' + stat + '</div>' +
+    '</div><div class="cd-files">';
+  for (const f of d.files) {
+    const n =
+      (f.additions != null ? '<span class="cd-add">+' + f.additions + '</span> ' : '') +
+      (f.deletions != null ? '<span class="cd-del">-' + f.deletions + '</span>' : '');
+    html +=
+      '<div class="cd-file" data-path="' + esc(f.path) + '">' +
+      '<span class="cd-file-path">' + esc(f.path) + '</span>' +
+      '<span class="cd-file-stat">' + n + '</span></div>';
+  }
+  html += '</div>';
+  body.innerHTML = html;
+  body.scrollTop = 0;
+  body.querySelectorAll(".cd-file").forEach((el) => {
+    el.onclick = () => {
+      state.commitFilePath = el.dataset.path;
+      body.innerHTML = '<div class="diff-meta" style="padding:12px">Loading…</div>';
+      post("selectFile", { hash: state.selectedCommit, path: el.dataset.path });
+    };
+  });
+}
+function renderCommitFileDiff(diff) {
+  const body = $("diffBody");
+  body.innerHTML =
+    '<div class="cd-back"><button type="button" id="cdBack">‹ All files</button>' +
+    '<span class="cd-back-path">' + esc(state.commitFilePath || "") + '</span></div>' +
+    '<div id="cdDiff"></div>';
+  $("cdBack").onclick = () => { state.commitFilePath = null; renderCommitDetail(); };
+  renderDiffInto($("cdDiff"), diff);
+}
+
 /* ---------- diff rendering ---------- */
 function renderDiff(text) {
-  const body = $("diffBody");
+  renderDiffInto($("diffBody"), text);
+}
+function renderDiffInto(body, text) {
   if (!text || !text.trim()) {
     body.innerHTML = '<div class="diff-meta" style="padding:8px">No textual changes (binary file or whitespace only).</div>';
     return;
@@ -1185,6 +1297,12 @@ window.addEventListener("message", (ev) => {
       state.hasMore = !!msg.hasMoreCommits;
       state.loadingMore = false;
       state.compare = null;
+      if (state.selectedCommit && !state.history.some((c) => c.hash === state.selectedCommit)) {
+        state.selectedCommit = null;
+        state.commitDetail = null;
+        state.commitFilePath = null;
+        updateLayout();
+      }
       renderHistory();
       break;
     case "loadMoreCommitsResponse": {
@@ -1248,14 +1366,25 @@ window.addEventListener("message", (ev) => {
       state.remote = msg.remoteStatus || null;
       renderToolbar(); updateLayout();
       break;
+    case "commitDetail":
+      state.commitDetail = msg.payload || null;
+      if (state.selectedCommit) renderCommitDetail();
+      break;
     case "workingDiff":
       if (msg.payload && msg.payload.path === state.selectedPath) renderDiff(msg.payload.diff);
       break;
     case "fileDiff":
-      if (msg.payload) renderDiff(msg.payload.diff);
+      if (!msg.payload) break;
+      if (state.selectedCommit && state.commitFilePath === msg.payload.path) {
+        renderCommitFileDiff(msg.payload.diff);
+      } else if (!state.selectedCommit) {
+        renderDiff(msg.payload.diff);
+      }
       break;
     case "error":
-      if (state.selectedPath) $("diffBody").innerHTML = '<div class="diff-meta" style="padding:8px">' + esc(msg.message || "Error") + "</div>";
+      if (state.selectedCommit || state.selectedPath) {
+        $("diffBody").innerHTML = '<div class="diff-meta" style="padding:8px">' + esc(msg.message || "Error") + "</div>";
+      }
       break;
   }
 });
