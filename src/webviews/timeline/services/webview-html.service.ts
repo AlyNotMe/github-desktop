@@ -208,15 +208,15 @@ button, input, textarea { font: inherit; color: inherit; }
 ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 5px; background-clip: padding-box; border: 2px solid transparent; }
 ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
 
-/* ---- toolbar (GitHub Desktop: 2-line cells) ---- */
+/* ---- toolbar (compact single line — the panel is short on height) ---- */
 #toolbar {
-  display: flex; flex: 0 0 auto; height: 50px;
+  display: flex; flex: 0 0 auto; height: 30px;
   background: var(--gd-chrome);
   border-bottom: 1px solid var(--gd-border);
 }
 .cell {
-  display: flex; align-items: center; gap: 8px;
-  flex: 1 1 0; min-width: 0; padding: 0 12px;
+  display: flex; align-items: center; gap: 6px;
+  flex: 1 1 0; min-width: 0; padding: 0 9px;
   background: transparent; border: 0;
   border-right: 1px solid var(--gd-border);
   cursor: pointer; text-align: left;
@@ -224,27 +224,21 @@ button, input, textarea { font: inherit; color: inherit; }
 .cell:last-child { border-right: 0; }
 .cell:hover { background: var(--vscode-list-hoverBackground); }
 .cell:active { background: var(--vscode-list-activeSelectionBackground); }
-.cell-ico { flex: 0 0 auto; display: flex; opacity: .8; }
-.cell-ico svg { width: 16px; height: 16px; }
-.cell-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-.cell-label {
-  font-size: 10px; line-height: 1.25; color: var(--vscode-descriptionForeground);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
+.cell-ico { flex: 0 0 auto; display: flex; opacity: .75; }
+.cell-ico svg { width: 13px; height: 13px; }
+.cell-text { display: flex; min-width: 0; }
+.cell-label { display: none; }
 .cell-value {
-  font-weight: 600; font-size: 12px; line-height: 1.3;
+  flex: 1 1 auto; font-weight: 600; font-size: 11px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.cell-caret { flex: 0 0 auto; opacity: .5; }
-.cell-caret svg { width: 12px; height: 12px; }
+.cell-caret { flex: 0 0 auto; opacity: .45; }
+.cell-caret svg { width: 9px; height: 9px; }
 .cell-count {
   flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px;
-  font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 10px;
+  font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 9px;
   background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
 }
-/* Narrow (sidebar): drop the labels, single line */
-body.narrow #toolbar { height: 34px; }
-body.narrow .cell-label { display: none; }
 
 /* ---- body split ---- */
 #body { flex: 1 1 auto; display: flex; min-height: 0; }
@@ -283,7 +277,7 @@ body.narrow #right { display: none; }
 /* ---- tabs ---- */
 #tabs { display: flex; flex: 0 0 auto; background: var(--gd-chrome); border-bottom: 1px solid var(--gd-border); }
 .tab {
-  flex: 1 1 0; height: 32px; background: transparent; border: 0;
+  flex: 1 1 0; height: 28px; background: transparent; border: 0;
   border-bottom: 2px solid transparent; cursor: pointer; font-size: 12px;
   color: var(--vscode-descriptionForeground); font-weight: 500;
   display: flex; align-items: center; justify-content: center; gap: 6px;
@@ -343,8 +337,8 @@ body.narrow #right { display: none; }
 /* ---- commit box ---- */
 #commitBox {
   position: sticky; bottom: 0; z-index: 2;
-  padding: 8px; border-top: 1px solid var(--gd-border);
-  display: flex; flex-direction: column; gap: 6px;
+  padding: 7px 8px; border-top: 1px solid var(--gd-border);
+  display: flex; flex-direction: column; gap: 5px;
   background: var(--gd-chrome);
 }
 .commit-summary { display: flex; align-items: center; gap: 8px; }
@@ -362,7 +356,7 @@ body.narrow #right { display: none; }
 }
 #summary { font-weight: 600; }
 #summary:focus, #description:focus { outline: 0; border-color: var(--vscode-focusBorder); }
-#description { resize: vertical; min-height: 44px; max-height: 140px; }
+#description { resize: vertical; min-height: 38px; max-height: 120px; }
 #commitBtn {
   width: 100%; padding: 8px 12px; border: 0; border-radius: var(--gd-radius); cursor: pointer;
   font-size: 12px; font-weight: 600;
