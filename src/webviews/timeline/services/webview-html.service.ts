@@ -291,8 +291,10 @@ body.narrow #right { display: none; }
 .tabpane { flex: 1 1 auto; min-height: 0; }
 /* Changes: one scroll for the whole pane; the commit box sticks to the bottom
    but is still reachable by scrolling when the panel is very short. */
-/* Both panes: fixed header/footer, the list scrolls in between. */
-#pane-changes, #pane-history { display: flex; flex-direction: column; overflow: hidden; }
+/* Changes: one scroll for the whole pane — file list AND the commit form
+   flow together, nothing overlays. */
+#pane-changes { display: block; overflow-y: auto; overflow-x: hidden; }
+#pane-history { display: flex; flex-direction: column; overflow: hidden; }
 
 /* ---- changed files ---- */
 #filterWrap { flex: 0 0 auto; padding: 8px 10px 4px; }
@@ -308,7 +310,7 @@ body.narrow #right { display: none; }
   cursor: pointer;
 }
 #allRow input, .file-row input[type=checkbox] { width: 13px; height: 13px; accent-color: var(--gd-accent); cursor: pointer; }
-#fileList { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+#fileList { min-height: 0; }
 .file-row {
   display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; cursor: pointer;
   white-space: nowrap; font-size: 12px;
