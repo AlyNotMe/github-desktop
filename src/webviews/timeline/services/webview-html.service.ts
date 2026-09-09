@@ -532,6 +532,8 @@ const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => (
 
 const state = {
   repository: (window.__INITIAL__ && window.__INITIAL__.repository) || null,
+  repositories: [],
+  activeRepoPath: null,
   account: null,
   changes: [],
   history: [],
@@ -1110,10 +1112,44 @@ function startNewBranch() {
 
 $("repoCell").onclick = () => {
   openMenu($("repoCell"), (m) => {
-    const it = document.createElement("div");
-    it.className = "menu-item is-current";
-    it.textContent = state.repository ? state.repository.path : "No repository open";
-    m.appendChild(it);
+    const repos = state.repositories || [];
+    if (repos.length > 1 || (repos.length && repos[0].path !== state.activeRepoPath)) {
+      const filter = document.createElement("input");
+      filter.className = "menu-filter"; filter.placeholder = "Find a repository…";
+      m.appendChild(filter);
+      const holder = document.createElement("div"); m.appendChild(holder);
+      const draw = () => {
+        const q = filter.value.trim().toLowerCase();
+        holder.innerHTML = "";
+        const items = repos.filter((r) => !q || r.name.toLowerCase().indexOf(q) >= 0 || r.path.toLowerCase().indexOf(q) >= 0);
+        if (!items.length) { holder.innerHTML = '<div class="menu-empty">No repositories</div>'; return; }
+        for (const r of items) {
+          const isCur = r.path === state.activeRepoPath;
+          const it = document.createElement("div");
+          it.className = "menu-item" + (isCur ? " is-current" : "");
+          it.innerHTML = '<span style="flex:1;min-width:0"><span style="display:block;overflow:hidden;text-overflow:ellipsis">' + esc(r.name) + (isCur ? "  (current)" : "") +
+            '</span><span style="display:block;font-size:10px;opacity:.55;overflow:hidden;text-overflow:ellipsis">' + esc(r.path) + '</span></span>';
+          it.onclick = () => { closeMenu(); if (!isCur) post("selectRepository", { path: r.path }); };
+          holder.appendChild(it);
+        }
+      };
+      filter.oninput = draw; draw();
+      setTimeout(() => filter.focus(), 0);
+    } else if (repos.length === 1) {
+      const it = document.createElement("div");
+      it.className = "menu-item is-current";
+      it.innerHTML = '<span style="overflow:hidden;text-overflow:ellipsis">' + esc(repos[0].path) + '</span>';
+      m.appendChild(it);
+    }
+    const sep = document.createElement("div"); sep.className = "menu-sep"; m.appendChild(sep);
+    const add = (label, cmd) => {
+      const it = document.createElement("div");
+      it.className = "menu-item"; it.textContent = label;
+      it.onclick = () => { closeMenu(); post(cmd); };
+      m.appendChild(it);
+    };
+    add("＋  Add local repository…", "addLocalRepository");
+    add("⤓  Clone repository…", "cloneRepository");
   });
 };
 
@@ -1197,6 +1233,10 @@ window.addEventListener("message", (ev) => {
     case "updateRepository":
       state.repository = msg.repository || null;
       renderToolbar(); setAvatar(); updateLayout();
+      break;
+    case "updateRepositoryList":
+      state.repositories = msg.repositories || [];
+      state.activeRepoPath = msg.activePath || null;
       break;
     case "updateAccounts":
       state.account = msg.activeAccount || null;

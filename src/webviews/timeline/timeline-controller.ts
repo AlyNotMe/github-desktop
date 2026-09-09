@@ -74,6 +74,15 @@ export class TimelineController implements Refresher {
     this.router = new MessageRouter(notifier)
       .on("ready", () => this.refresh())
       .on("refresh", () => this.refresh())
+      .on("selectRepository", (m) => {
+        repos.setActive(m.path);
+        return this.refresh();
+      })
+      .on("addLocalRepository", async () => {
+        await repos.addLocal();
+        await this.refresh();
+      })
+      .on("cloneRepository", () => repos.clone())
       .on("stageFiles", (m) => working.stage(m.files))
       .on("unstageFiles", (m) => working.unstage(m.files))
       .on("commit", (m) => working.commit(m.message))
@@ -160,6 +169,13 @@ export class TimelineController implements Refresher {
     channel.post({
       command: "updateRepository",
       repository: snapshot.repository,
+    });
+    channel.post({
+      command: "updateRepositoryList",
+      repositories: this.deps.repos
+        .list()
+        .map((r) => ({ name: r.name, path: r.localPath })),
+      activePath: snapshot.repository.path,
     });
 
     const active = accounts.getActiveAccount();

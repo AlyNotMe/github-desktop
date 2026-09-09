@@ -22,6 +22,9 @@ import {
 export type InboundMessage =
   | { command: "ready" }
   | { command: "refresh" }
+  | { command: "selectRepository"; path: string }
+  | { command: "addLocalRepository" }
+  | { command: "cloneRepository" }
   | { command: "stageFiles"; files: string[] }
   | { command: "unstageFiles"; files: string[] }
   | { command: "commit"; message: string }
@@ -75,6 +78,11 @@ export type InboundCommand = InboundMessage["command"];
 
 export type OutboundMessage =
   | { command: "updateRepository"; repository: RepositorySummary | null }
+  | {
+      command: "updateRepositoryList";
+      repositories: Array<{ name: string; path: string }>;
+      activePath: string | null;
+    }
   | { command: "updateChanges"; changes: ChangeEntry[] }
   | {
       command: "updateHistory";

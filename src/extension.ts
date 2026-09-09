@@ -14,6 +14,9 @@ import { TrackedRepository } from "./shared/types";
 export async function activate(
   context: vscode.ExtensionContext,
 ): Promise<void> {
+  // Never let a spawned git block on an interactive credential prompt.
+  process.env.GIT_TERMINAL_PROMPT = "0";
+
   const accountManager = new AccountManager(
     context.globalState,
     context.secrets,
@@ -485,11 +488,3 @@ async function linkUnassignedRepositories(
     await repositories.updateRepository(repo.id, { accountId });
   }
 }
-
-
-
-
-
-
-
-

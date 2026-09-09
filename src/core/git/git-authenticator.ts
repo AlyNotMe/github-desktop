@@ -21,10 +21,9 @@ export interface GitClientFactory {
    * Runs `fn` with a client whose network operations carry the active GitHub
    * account's token.
    *
-   * The token is injected through the `GIT_CONFIG_*` environment variables of
-   * the spawned git process as an ephemeral `http.extraheader`. It is **never**
-   * written to `.git/config`, so there is nothing to clean up and no shared
-   * state to race on.
+   * The token is injected as an ephemeral `-c http.<url>.extraheader=…` on each
+   * git invocation. It is **never** written to `.git/config`, so there is
+   * nothing to clean up and no shared state to race on.
    *
    * If no account is active or no token is available, `fn` still runs with a
    * plain client (git may then fall back to a system credential helper).
@@ -55,22 +54,21 @@ export class AccountGitClientFactory implements GitClientFactory {
     repoPath: string,
     fn: (git: SimpleGit) => Promise<T>,
   ): Promise<T> {
-    const git = simpleGit(repoPath);
     const token = await this.resolveToken();
     if (!token) {
-      return fn(git);
+      return fn(simpleGit(repoPath));
     }
 
     const header = `Authorization: Basic ${Buffer.from(
       `x-access-token:${token}`,
     ).toString("base64")}`;
 
-    git.env({
-      ...process.env,
-      GIT_CONFIG_COUNT: "1",
-      GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
-      GIT_CONFIG_VALUE_0: header,
-      GIT_TERMINAL_PROMPT: "0",
+    // `-c http.<url>.extraheader=…` on every invocation. Not written to config,
+    // nothing to clean up. (We do NOT call `.env()` here — passing GIT_* vars
+    // through trips simple-git's unsafe-env guard; GIT_TERMINAL_PROMPT is set
+    // once at activation instead.)
+    const git = simpleGit(repoPath, {
+      config: [`http.https://github.com/.extraheader=${header}`],
     });
 
     return fn(git);

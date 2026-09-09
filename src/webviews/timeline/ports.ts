@@ -7,8 +7,16 @@ import { OutboundMessage } from "./messages";
  * repository manager or the VS Code workspace API directly.
  */
 export interface RepositoryContext {
-  /** The active repository, or `undefined` when the workspace has none. */
+  /** The active repository, or `undefined` when there is none. */
   getPrimary(): TrackedRepository | undefined;
+  /** Every tracked repository, for the repository picker. */
+  list(): TrackedRepository[];
+  /** Sets the active repository for this session (in-memory override). */
+  setActive(localPath: string): void;
+  /** Prompts for a local folder and tracks it as a repository. */
+  addLocal(): Promise<void>;
+  /** Runs the "clone repository" flow. */
+  clone(): Promise<void>;
 }
 
 /**
