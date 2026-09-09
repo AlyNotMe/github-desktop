@@ -18,7 +18,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         'commit-detail': path.resolve(__dirname, "src/webviews/commitDetail/index.tsx"),
-        'history-explorer': path.resolve(__dirname, "src/webviews/historyExplorerApp/index.tsx"),
       },
       output: {
         entryFileNames: '[name].js',
