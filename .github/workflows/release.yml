@@ -102,7 +102,7 @@ jobs:
         run: |
           if [ -n "$VSCE_PAT" ]; then
             npm install -g @vscode/vsce
-            vsce publish -p $VSCE_PAT
+            vsce publish -p $VSCE_PAT --allow-package-secrets github
             echo "✅ Published to VS Code Marketplace"
           else
             echo "⚠️ VSCE_PAT secret not set, skipping marketplace publish"
