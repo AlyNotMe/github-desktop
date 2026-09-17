@@ -1256,6 +1256,9 @@ $("branchCell").onclick = () => {
       m.appendChild(it);
     };
     mkAction("＋  New branch…", startNewBranch);
+    if (state.currentBranch && state.branches.filter((b) => !b.startsWith("remotes/")).length > 1) {
+      mkAction("⑂  Merge into current branch…", startMergeBranch);
+    }
     if (state.currentBranch) mkAction("⇡  Create pull request…", () => post("createPullRequest", { branch: state.currentBranch }));
     if (state.changes.length > 0) mkAction("⇩  Stash all changes", () => post("stashPush", { message: "" }));
     for (const s of state.stashes) {
@@ -1372,6 +1375,40 @@ function startNewBranch() {
     }
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(true); } });
     setTimeout(() => input.focus(), 0);
+  });
+}
+
+function startMergeBranch() {
+  openMenu($("branchCell"), (m) => {
+    const into = state.currentBranch || "HEAD";
+    const hint = document.createElement("div");
+    hint.className = "menu-empty";
+    hint.textContent = "Merge a branch into " + into + ":";
+    m.appendChild(hint);
+
+    const filter = document.createElement("input");
+    filter.className = "menu-filter"; filter.placeholder = "Find a branch to merge…";
+    m.appendChild(filter);
+    const holder = document.createElement("div"); m.appendChild(holder);
+    const candidates = state.branches.filter((b) => b !== state.currentBranch);
+    const draw = () => {
+      const q = filter.value.trim().toLowerCase();
+      holder.innerHTML = "";
+      const items = candidates.filter((b) => !q || b.toLowerCase().indexOf(q) >= 0);
+      if (!items.length) { holder.innerHTML = '<div class="menu-empty">No other branches</div>'; return; }
+      for (const b of items) {
+        const it = document.createElement("div");
+        it.className = "menu-item";
+        it.innerHTML = '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(b) + '</span>';
+        it.onclick = () => {
+          closeMenu();
+          post("mergeBranch", { fromBranch: b, toBranch: state.currentBranch });
+        };
+        holder.appendChild(it);
+      }
+    };
+    filter.oninput = draw; draw();
+    setTimeout(() => filter.focus(), 0);
   });
 }
 

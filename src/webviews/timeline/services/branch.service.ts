@@ -100,6 +100,30 @@ export class BranchService extends RepositoryScopedService {
       if (!fromBranch || !toBranch) {
         return;
       }
+      const defaultBranch = repo.defaultBranch || "main";
+      const isDefault = (b: string) =>
+        b === defaultBranch || (!repo.defaultBranch && b === "master");
+
+      if (isDefault(fromBranch)) {
+        // Merging the default branch INTO something is usually fine (keeping
+        // a feature branch up to date), but it's also the exact mistake that
+        // happens when you meant to merge the other way (current -> default)
+        // and picked the wrong side. Make sure that's intentional.
+        const proceed = await this.notifier.confirm(
+          `"${fromBranch}" is the default branch. Merging it into "${toBranch}" ` +
+            `will bring in its entire history. If you meant to update ` +
+            `"${fromBranch}" instead, cancel and check out "${fromBranch}" first.`,
+          "Merge anyway",
+        );
+        if (!proceed) {
+          return;
+        }
+      } else if (!isDefault(toBranch)) {
+        this.notifier.warn(
+          `Merging into "${toBranch}", which is not the default branch.`,
+        );
+      }
+
       const git = this.git.plain(repo.localPath);
       await git.checkout(toBranch);
       try {
