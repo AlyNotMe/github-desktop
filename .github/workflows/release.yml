@@ -38,23 +38,17 @@ jobs:
       - name: Get changelog entry
         id: changelog
         run: |
-          # Extract changelog for this version (customize based on your CHANGELOG format)
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          NOTES=$(awk -v ver="## [v$VERSION]" '
+            index($0, ver) == 1 { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md)
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES="_No changelog entry found for v$VERSION in CHANGELOG.md._"
+          fi
           echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
-          echo "## What's New in v${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "### Features" >> $GITHUB_OUTPUT
-          echo "- Multi-account support with secure token storage" >> $GITHUB_OUTPUT
-          echo "- Visual Git operations with GitHub Desktop-style UI" >> $GITHUB_OUTPUT
-          echo "- Advanced branch management and commit history" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "### Improvements" >> $GITHUB_OUTPUT
-          echo "- Better authentication handling" >> $GITHUB_OUTPUT
-          echo "- Enhanced diff viewer integration" >> $GITHUB_OUTPUT
-          echo "- Performance optimizations" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "### Bug Fixes" >> $GITHUB_OUTPUT
-          echo "- Fixed authentication issues with push/pull operations" >> $GITHUB_OUTPUT
-          echo "- Resolved commit panel display issues" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release

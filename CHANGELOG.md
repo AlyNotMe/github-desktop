@@ -5,7 +5,53 @@ All notable changes to the GitHub Desktop for VS Code extension will be document
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.8.1] - 2026-09-17
+
+### Fixed
+- Marketplace publish step failing on a false-positive secret scan (a
+  placeholder PAT string in the "enter your token" input box)
+
+## [v1.8.0] - 2026-09-17
+
+### Added
+- Merge a branch into the current branch from the branch dropdown, with a
+  confirmation guard against merging the default branch in the wrong
+  direction
+
+### Fixed
+- CI/release workflows updated to the npm + webpack build introduced in
+  v1.7.0 (previously still targeting the removed pnpm/vite/webview build)
+
+## [v1.7.0] - 2026-09-17
+
+### Changed
+- SOLID rewrite of the extension backend: the message-handler god object
+  split into cohesive services (working-tree, sync, branch, commit-actions,
+  conflict, stash, diff, pull-request, repository-data) behind ports &
+  adapters, with a single composition root (`TimelineController`)
+- Webview replaced: React/MUI/vite timeline and commit-detail panel
+  rewritten as one self-contained HTML/CSS/JS view modeled on the GitHub
+  Desktop app; bundle size reduced from ~600 KB to ~300 KB
+- New diff renderer styled like VS Code's native diff editor, with dual
+  gutters and word-level intra-line highlighting
+- Git auth now uses an ephemeral `-c http.extraheader` instead of writing
+  the token into `.git/config`
+
+### Added
+- Force-push (`--force-with-lease`), branch comparison, undo last commit,
+  amend, co-authors, conflict resolution (continue/abort/mark resolved),
+  and stash (push/apply/drop)
+- Branch dropdown ordered by recency (MRU via reflog)
+- Repository picker that also opens the folder in VS Code
+- Pull request list, with checkout via the GitHub REST API
+
+### Removed
+- History Explorer and the old React timeline
+
 ## [v1.1.0] - 2024-01-20
+
+_Versions v1.1.1 through v1.6.1 were incremental fixes and UI iterations
+released without individual changelog entries._
 
 ### Added
 - Browser-based authentication using VS Code's built-in GitHub authentication
