@@ -3,6 +3,14 @@ import * as vscode from "vscode";
 import { RepositoryManager } from "../../../core/repositories/repository-manager";
 import { getPrimaryRepository } from "../../../shared/utils/repo-selection";
 
+/**
+ * Renders the timeline webview as a self-contained GitHub Desktop-style UI:
+ * a three-cell toolbar (repository / branch / sync), a left column with the
+ * Changes and History tabs plus the commit box, and a diff pane on the right.
+ *
+ * Everything is inlined (no bundle, no CDN, nonce-based CSP) so the view keeps
+ * working regardless of the webview module loader.
+ */
 export class WebviewHtmlService {
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -10,21 +18,9 @@ export class WebviewHtmlService {
   ) {}
 
   generateHtml(webview: vscode.Webview): string {
-    const reactAppUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(
-        this.context.extensionUri,
-        "out",
-        "webview",
-        "main.js",
-      ),
-    );
-
+    const nonce = getNonce();
     const repository = getPrimaryRepository(this.repositories);
     const initialData = {
-      changes: [],
-      history: [],
-      branches: [],
-      currentBranch: null,
       repository: repository
         ? {
             name: path.basename(repository.localPath),
@@ -32,67 +28,1579 @@ export class WebviewHtmlService {
             remote: repository.remoteUrl,
           }
         : null,
-      accounts: [],
-      activeAccount: null,
     };
+
+    const csp = [
+      `default-src 'none'`,
+      `style-src 'nonce-${nonce}'`,
+      `script-src 'nonce-${nonce}'`,
+      `img-src ${webview.cspSource} https: data:`,
+      `font-src ${webview.cspSource}`,
+    ].join("; ");
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline' https:; script-src ${webview.cspSource} 'unsafe-inline'; img-src https: data:; font-src ${webview.cspSource} https:;">
-    <title>GitHub Desktop Timeline</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@vscode/codicons@0.0.35/dist/codicon.css">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            background-color: var(--vscode-sideBar-background);
-            color: var(--vscode-foreground);
-            color-scheme: light dark;
-            font-family: var(--vscode-font-family, "Segoe UI", system-ui, -apple-system, sans-serif);
-            font-size: var(--vscode-font-size, 13px);
-            overflow: hidden;
-        }
-        #root {
-            width: 100%;
-            height: 100%;
-            margin: 0;
-            padding: 0;
-        }
-        .codicon {
-            font-family: 'codicon';
-            cursor: default;
-            user-select: none;
-            color: var(--vscode-foreground);
-        }
-    </style>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="${csp}">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GitHub Desktop</title>
+<style nonce="${nonce}">
+${STYLES}
+</style>
 </head>
-<body class="vscode-body">
-    <div id="root"></div>
-    <script>
-        const vscode = acquireVsCodeApi();
+<body>
+<div id="toolbar">
+  <button class="cell" id="repoCell" type="button" title="Current repository">
+    <span class="cell-ico">${ICON.repo}</span>
+    <span class="cell-text">
+      <span class="cell-label">Current repository</span>
+      <span class="cell-value" id="repoName">&mdash;</span>
+    </span>
+    <span class="cell-caret">${ICON.caret}</span>
+  </button>
+  <button class="cell" id="branchCell" type="button" title="Current branch">
+    <span class="cell-ico">${ICON.branch}</span>
+    <span class="cell-text">
+      <span class="cell-label">Current branch</span>
+      <span class="cell-value" id="branchName">&mdash;</span>
+    </span>
+    <span class="cell-caret">${ICON.caret}</span>
+  </button>
+  <button class="cell" id="syncCell" type="button">
+    <span class="cell-ico" id="syncIco">${ICON.fetch}</span>
+    <span class="cell-text">
+      <span class="cell-value" id="syncLabel">Fetch origin</span>
+      <span class="cell-label" id="syncSub">Never fetched</span>
+    </span>
+    <span class="cell-count" id="syncCount" hidden></span>
+  </button>
+</div>
 
-        // Global functions that React components can call
-        window.vscodeApi = {
-            postMessage: (message) => vscode.postMessage(message),
-            getState: () => vscode.getState(),
-            setState: (state) => vscode.setState(state)
-        };
+<div id="body">
+  <div id="left">
+    <div id="tabs">
+      <button class="tab is-active" data-tab="changes" type="button">Changes <span class="badge" id="changesBadge">0</span></button>
+      <button class="tab" data-tab="history" type="button">History</button>
+    </div>
 
-        // Pass initial data to React app
-        window.initialData = ${JSON.stringify(initialData)};
-    </script>
-    <script type="module" src="${reactAppUri}"></script>
+    <div class="tabpane" id="pane-changes">
+      <div id="conflictBar" hidden>
+        <div id="conflictText"></div>
+        <div id="conflictActions">
+          <button id="conflictAbort" type="button">Abort</button>
+          <button id="conflictContinue" type="button">Continue</button>
+        </div>
+      </div>
+      <div id="filterWrap">
+        <input id="filter" type="text" placeholder="Filter changed files" autocomplete="off" spellcheck="false">
+      </div>
+      <label id="allRow">
+        <input type="checkbox" id="allCheck">
+        <span id="allText">0 changed files</span>
+      </label>
+      <div id="fileList"></div>
+      <div id="noChanges" class="empty-block">
+        <div class="empty-emoji">${ICON.check}</div>
+        <div class="empty-title">No local changes</div>
+        <div class="empty-sub">There are no uncommitted changes in this repository.</div>
+      </div>
+      <div id="commitBox">
+        <div class="commit-summary">
+          <span class="avatar" id="avatar">?</span>
+          <input id="summary" type="text" placeholder="Summary (required)" autocomplete="off">
+        </div>
+        <textarea id="description" placeholder="Description"></textarea>
+        <input id="coAuthors" type="text" hidden autocomplete="off"
+          placeholder="Co-authors: @handle, Name &lt;email&gt;">
+        <div id="commitMeta">
+          <button id="coAuthToggle" type="button" title="Add co-authors">${ICON.people}</button>
+          <label id="amendRow"><input type="checkbox" id="amendCheck"> Amend</label>
+        </div>
+        <button id="commitBtn" type="button" disabled>Commit to <strong id="commitBranch">branch</strong></button>
+      </div>
+      <div id="lastCommitBar" hidden>
+        <span id="lastCommitText"></span>
+        <button id="undoBtn2" type="button">Undo</button>
+      </div>
+    </div>
+
+    <div class="tabpane" id="pane-history" hidden>
+      <div id="compareBar" hidden>
+        <span id="compareText"></span>
+        <button id="compareExit" type="button">✕</button>
+      </div>
+      <div id="commitList"></div>
+      <div id="noHistory" class="empty-block" hidden>
+        <div class="empty-title">No history</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="right">
+    <div id="rightEmpty">
+      <div id="emptyHeading">No local changes</div>
+      <div id="emptySub">There are no uncommitted changes in this repository. Here is what you can do next.</div>
+      <div id="emptyCards"></div>
+    </div>
+    <div id="diffHeader" hidden><span id="diffPath"></span></div>
+    <div id="diffBody" hidden></div>
+  </div>
+</div>
+
+<div id="menu" class="menu" hidden></div>
+
+<script nonce="${nonce}">
+window.__INITIAL__ = ${JSON.stringify(initialData)};
+${SCRIPT}
+</script>
 </body>
 </html>`;
   }
 }
+
+function getNonce(): string {
+  let text = "";
+  const possible =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  for (let i = 0; i < 32; i++) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
+}
+
+const ICON = {
+  repo: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.5 2.5 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.5 2.5 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.25.25 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z"/></svg>`,
+  branch: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>`,
+  fetch: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm.5 4.75a.75.75 0 0 0-1.5 0v3.5c0 .414.336.75.75.75h2.5a.75.75 0 0 0 0-1.5H8.5Z"/></svg>`,
+  push: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.5 3.75 5.75l1.06 1.06L7.25 4.4v7.35h1.5V4.4l2.44 2.41 1.06-1.06Z"/></svg>`,
+  pull: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 14.5 3.75 10.25l1.06-1.06L7.25 11.6V4.25h1.5v7.35l2.44-2.41 1.06 1.06Z"/></svg>`,
+  publish: `<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1 4 5h2.5v5h3V5H12ZM3 12.5h10V14H3Z"/></svg>`,
+  caret: `<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M4 6l4 4 4-4Z"/></svg>`,
+  check: `<svg viewBox="0 0 16 16" width="28" height="28" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/></svg>`,
+  file: `<svg viewBox="0 0 16 16" width="28" height="28" fill="currentColor"><path d="M2 1.75C2 .784 2.784 0 3.75 0h5.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 12.25 16h-8.5A1.75 1.75 0 0 1 2 14.25Zm7.5-.25v2.75c0 .414.336.75.75.75h2.75Z"/></svg>`,
+  people: `<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor"><path d="M5.5 3.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm0 5c2 0 3.5 1 3.5 2.75V12H2v-.75C2 9.5 3.5 8.5 5.5 8.5Zm5.5-4a1.75 1.75 0 1 1 0 3.5 1.75 1.75 0 0 1 0-3.5Zm.25 4.5c1.66 0 2.75.9 2.75 2.4V12h-3.2c.06-.28.2-.85.2-1.25 0-.7-.2-1.3-.55-1.8.27-.06.55-.1.85-.1Z"/></svg>`,
+  linkExt: `<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M3.75 2h3a.75.75 0 0 1 0 1.5h-3a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-3a.75.75 0 0 1 1.5 0v3A1.75 1.75 0 0 1 12.25 14h-8.5A1.75 1.75 0 0 1 2 12.25v-8.5C2 2.784 2.784 2 3.75 2Zm5.5-.5a.75.75 0 0 1 .75-.75h3.75a.75.75 0 0 1 .75.75V5.5a.75.75 0 0 1-1.5 0V3.56L8.53 8.28a.75.75 0 0 1-1.06-1.06L12.19 2.5H10a.75.75 0 0 1-.75-.75Z"/></svg>`,
+};
+
+const STYLES = `
+* { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
+:root {
+  color-scheme: light dark;
+  --gd-accent: var(--vscode-button-background, #1f6feb);
+  --gd-accent-fg: var(--vscode-button-foreground, #fff);
+  --gd-chrome: var(--vscode-sideBarSectionHeader-background, var(--vscode-sideBar-background));
+  --gd-border: var(--vscode-panel-border, rgba(128,128,128,.28));
+  --gd-radius: 6px;
+}
+html, body { height: 100%; }
+body {
+  display: flex; flex-direction: column;
+  font-family: var(--vscode-font-family, -apple-system, "Segoe UI", system-ui, sans-serif);
+  font-size: 12px; line-height: 1.4;
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background);
+  overflow: hidden;
+}
+button, input, textarea { font: inherit; color: inherit; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 5px; background-clip: padding-box; border: 2px solid transparent; }
+::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
+
+/* ---- toolbar (compact single line — the panel is short on height) ---- */
+#toolbar {
+  display: flex; flex: 0 0 auto; height: 30px;
+  background: var(--gd-chrome);
+  border-bottom: 1px solid var(--gd-border);
+}
+.cell {
+  display: flex; align-items: center; gap: 6px;
+  flex: 1 1 0; min-width: 0; padding: 0 9px;
+  background: transparent; border: 0;
+  border-right: 1px solid var(--gd-border);
+  cursor: pointer; text-align: left;
+}
+.cell:last-child { border-right: 0; }
+.cell:hover { background: var(--vscode-list-hoverBackground); }
+.cell:active { background: var(--vscode-list-activeSelectionBackground); }
+.cell-ico { flex: 0 0 auto; display: flex; opacity: .75; }
+.cell-ico svg { width: 13px; height: 13px; }
+.cell-text { display: flex; min-width: 0; }
+.cell-label { display: none; }
+.cell-value {
+  flex: 1 1 auto; font-weight: 600; font-size: 11px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cell-caret { flex: 0 0 auto; opacity: .45; }
+.cell-caret svg { width: 9px; height: 9px; }
+.cell-count {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px;
+  font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 9px;
+  background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
+}
+
+/* ---- body split ---- */
+#body { flex: 1 1 auto; display: flex; min-height: 0; }
+#left {
+  flex: 0 0 46%; max-width: 340px; min-width: 220px;
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--vscode-sideBar-background);
+  border-right: 1px solid var(--gd-border);
+}
+body.narrow #left { flex: 1 1 auto; max-width: none; border-right: 0; }
+body.narrow #right { display: none; }
+#right { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; background: var(--vscode-editor-background); }
+
+/* ---- right: rich empty state (GitHub Desktop "No local changes") ---- */
+#rightEmpty { flex: 1 1 auto; overflow: auto; padding: 32px 28px; }
+#emptyHeading { font-size: 26px; font-weight: 300; color: var(--vscode-foreground); }
+#emptySub { margin-top: 8px; font-size: 12px; color: var(--vscode-descriptionForeground); max-width: 420px; line-height: 1.5; }
+#emptyCards { margin-top: 22px; display: flex; flex-direction: column; gap: 12px; max-width: 520px; }
+.empty-card {
+  border: 1px solid var(--gd-border); border-radius: 8px; padding: 14px 16px;
+  display: flex; align-items: center; gap: 14px;
+}
+.empty-card.is-primary { border-color: var(--gd-accent); background: color-mix(in srgb, var(--gd-accent) 8%, transparent); }
+.empty-card-body { flex: 1 1 auto; min-width: 0; }
+.empty-card-title { font-size: 12px; font-weight: 600; }
+.empty-card-desc { font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 3px; line-height: 1.45; }
+.empty-card-btn {
+  flex: 0 0 auto; padding: 6px 14px; border-radius: var(--gd-radius); cursor: pointer;
+  font-size: 12px; font-weight: 600; border: 1px solid var(--gd-border);
+  background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-foreground);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.empty-card.is-primary .empty-card-btn { background: var(--gd-accent); color: var(--gd-accent-fg); border-color: transparent; }
+.empty-card-btn:hover { filter: brightness(1.1); }
+
+/* ---- tabs ---- */
+#tabs { display: flex; flex: 0 0 auto; background: var(--gd-chrome); border-bottom: 1px solid var(--gd-border); }
+.tab {
+  flex: 1 1 0; height: 28px; background: transparent; border: 0;
+  border-bottom: 2px solid transparent; cursor: pointer; font-size: 12px;
+  color: var(--vscode-descriptionForeground); font-weight: 500;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.tab:hover { color: var(--vscode-foreground); }
+.tab.is-active { color: var(--vscode-foreground); border-bottom-color: var(--gd-accent); }
+.badge {
+  font-size: 10px; font-weight: 600; min-width: 16px; padding: 1px 5px; border-radius: 9px;
+  background: var(--vscode-badge-background); color: var(--vscode-badge-foreground);
+}
+.tabpane { flex: 1 1 auto; min-height: 0; }
+/* Changes: one scroll for the whole pane; the commit box sticks to the bottom
+   but is still reachable by scrolling when the panel is very short. */
+/* Changes: one scroll for the whole pane — file list AND the commit form
+   flow together, nothing overlays. */
+#pane-changes { display: block; overflow-y: auto; overflow-x: hidden; }
+#pane-history { display: flex; flex-direction: column; overflow: hidden; }
+
+/* ---- changed files ---- */
+#filterWrap { flex: 0 0 auto; padding: 8px 10px 4px; }
+#filter {
+  width: 100%; padding: 5px 8px; border-radius: var(--gd-radius); font-size: 12px;
+  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--gd-border));
+}
+#filter:focus { outline: 0; border-color: var(--vscode-focusBorder); }
+#allRow {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; font-size: 11px; color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+}
+#allRow input, .file-row input[type=checkbox] { width: 13px; height: 13px; accent-color: var(--gd-accent); cursor: pointer; }
+#fileList { min-height: 0; }
+.file-row {
+  display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; cursor: pointer;
+  white-space: nowrap; font-size: 12px;
+}
+.file-row:hover { background: var(--vscode-list-hoverBackground); }
+.file-row.is-selected { background: var(--vscode-list-inactiveSelectionBackground); }
+.file-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.file-dir { opacity: .55; }
+.status-sq {
+  flex: 0 0 auto; width: 16px; height: 16px; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; line-height: 1; color: #fff;
+}
+.st-M { background: var(--vscode-gitDecoration-modifiedResourceForeground, #d0a215); }
+.st-A, .st-U { background: var(--vscode-gitDecoration-untrackedResourceForeground, #2ea043); }
+.st-D { background: var(--vscode-gitDecoration-deletedResourceForeground, #d73a49); }
+.st-R { background: var(--vscode-gitDecoration-renamedResourceForeground, #8250df); }
+.st-C { background: var(--vscode-gitDecoration-conflictingResourceForeground, #e4676b); }
+.file-x {
+  flex: 0 0 auto; opacity: 0; width: 18px; height: 18px; border: 0; border-radius: 4px;
+  background: transparent; cursor: pointer; color: inherit; font-size: 14px; line-height: 1;
+}
+.file-row:hover .file-x { opacity: .6; }
+.file-x:hover { opacity: 1; background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.2)); }
+
+/* ---- commit box ---- */
+#commitBox {
+  flex: 0 0 auto;
+  padding: 7px 8px; border-top: 1px solid var(--gd-border);
+  display: flex; flex-direction: column; gap: 5px;
+  background: var(--gd-chrome);
+}
+.commit-summary { display: flex; align-items: center; gap: 8px; }
+.avatar {
+  flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  background: var(--gd-accent); color: var(--gd-accent-fg);
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#summary, #description {
+  width: 100%; padding: 6px 9px; border-radius: var(--gd-radius); font-size: 12px;
+  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--gd-border));
+}
+#summary { font-weight: 600; }
+#summary:focus, #description:focus { outline: 0; border-color: var(--vscode-focusBorder); }
+#description { resize: vertical; min-height: 38px; max-height: 120px; }
+#commitBtn {
+  width: 100%; padding: 8px 12px; border: 0; border-radius: var(--gd-radius); cursor: pointer;
+  font-size: 12px; font-weight: 600;
+  background: var(--gd-accent); color: var(--gd-accent-fg);
+}
+#commitBtn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground, var(--gd-accent)); filter: brightness(1.08); }
+#commitBtn:disabled { opacity: .45; cursor: default; }
+#commitBtn strong { font-weight: 700; }
+
+/* ---- history ---- */
+#commitList { flex: 1 1 auto; overflow: auto; min-height: 0; }
+.commit-row {
+  display: flex; flex-direction: column; gap: 3px; padding: 9px 12px; cursor: pointer;
+  border-bottom: 1px solid var(--gd-border);
+}
+.commit-row:hover { background: var(--vscode-list-hoverBackground); }
+.commit-row.is-selected { background: var(--vscode-list-inactiveSelectionBackground); box-shadow: inset 2px 0 0 var(--gd-accent); }
+.commit-msg { font-weight: 500; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-meta { font-size: 11px; color: var(--vscode-descriptionForeground); display: flex; align-items: center; gap: 6px; }
+.unpushed-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gd-accent); flex: 0 0 auto; }
+
+/* ---- diff ---- */
+#diffHeader {
+  flex: 0 0 auto; padding: 10px 16px; font-size: 12px; font-weight: 600;
+  background: var(--gd-chrome);
+  border-bottom: 1px solid var(--gd-border);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#diffBody {
+  flex: 1 1 auto; overflow: auto; min-height: 0;
+  background: var(--vscode-editor-background);
+  font-family: var(--vscode-editor-font-family, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: var(--vscode-editor-font-size, 12px); line-height: 1.5;
+}
+.dl { display: flex; white-space: pre; align-items: flex-start; }
+.dg {
+  flex: 0 0 auto; width: 40px; padding: 0 6px; text-align: right;
+  color: var(--vscode-editorLineNumber-foreground); opacity: .55;
+  user-select: none; font-variant-numeric: tabular-nums;
+}
+.ds { flex: 0 0 auto; width: 16px; text-align: center; user-select: none; opacity: .6; }
+.dt { flex: 1 1 auto; padding: 0 10px 0 4px; white-space: pre-wrap; word-break: break-word; }
+.d-add { background: var(--vscode-diffEditor-insertedLineBackground, var(--vscode-diffEditor-insertedTextBackground, rgba(46,160,67,.12))); }
+.d-del { background: var(--vscode-diffEditor-removedLineBackground, var(--vscode-diffEditor-removedTextBackground, rgba(248,81,73,.12))); }
+.d-add .ds { color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043); opacity: 1; }
+.d-del .ds { color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149); opacity: 1; }
+.dw-add { background: var(--vscode-diffEditor-insertedTextBackground, rgba(46,160,67,.4)); border-radius: 2px; }
+.dw-del { background: var(--vscode-diffEditor-removedTextBackground, rgba(248,81,73,.4)); border-radius: 2px; }
+.dh {
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-editor-inactiveSelectionBackground, rgba(128,128,128,.12));
+  padding: 2px 10px; margin: 4px 0; font-size: 11px;
+}
+.dh .dt { padding: 0; white-space: pre; }
+.diff-meta { color: var(--vscode-descriptionForeground); }
+
+/* ---- commit detail ---- */
+.cd-head {
+  padding: 12px 16px; border-bottom: 1px solid var(--gd-border);
+  background: var(--gd-chrome); font-family: var(--vscode-font-family);
+}
+.cd-subject { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+.cd-meta { font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 2px; }
+.cd-sha { font-family: var(--vscode-editor-font-family, monospace); }
+.cd-add { color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043); }
+.cd-del { color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149); }
+.cd-files { font-family: var(--vscode-font-family); }
+.cd-file {
+  display: flex; align-items: center; gap: 8px; padding: 6px 16px; cursor: pointer;
+  border-bottom: 1px solid var(--gd-border); font-size: 12px;
+}
+.cd-file:hover { background: var(--vscode-list-hoverBackground); }
+.cd-file-path { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.cd-file-stat { flex: 0 0 auto; font-size: 11px; }
+.cd-back {
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  border-bottom: 1px solid var(--gd-border); background: var(--gd-chrome);
+}
+.cd-back button {
+  background: none; border: 0; color: var(--gd-accent); cursor: pointer;
+  font-size: 12px; padding: 0;
+}
+.cd-back-path {
+  font-size: 11px; color: var(--vscode-descriptionForeground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ---- empty states ---- */
+.empty-block {
+  flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; text-align: center; padding: 24px 20px; gap: 8px;
+}
+#noChanges { flex: 0 0 auto; padding: 28px 20px; }
+/* The rich "No local changes" lives in the right pane; only show the left
+   placeholder when the right pane is hidden (narrow / sidebar). */
+body:not(.narrow) #noChanges { display: none !important; }
+.empty-emoji { opacity: .3; }
+.empty-emoji svg { width: 32px; height: 32px; }
+.empty-title { font-size: 13px; font-weight: 400; color: var(--vscode-foreground); }
+.empty-sub { font-size: 11px; color: var(--vscode-descriptionForeground); max-width: 240px; line-height: 1.5; }
+
+/* ---- popup menu ---- */
+.menu {
+  position: fixed; z-index: 50; min-width: 240px; max-height: 66vh; overflow: auto;
+  background: var(--vscode-menu-background, var(--vscode-dropdown-background, var(--gd-chrome)));
+  border: 1px solid var(--vscode-menu-border, var(--gd-border));
+  border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.45); padding: 5px;
+}
+.menu input.menu-filter {
+  width: 100%; margin-bottom: 4px; padding: 6px 8px; border-radius: var(--gd-radius);
+  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--gd-border));
+}
+.menu input.menu-filter:focus { outline: 0; border-color: var(--vscode-focusBorder); }
+.menu-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 9px; border-radius: var(--gd-radius);
+  cursor: pointer; white-space: nowrap; font-size: 12px;
+}
+.menu-item:hover { background: var(--vscode-list-hoverBackground); }
+.menu-item.is-current { color: var(--vscode-descriptionForeground); }
+.menu-sep { height: 1px; margin: 5px 4px; background: var(--gd-border); }
+.menu-tabs { display: flex; gap: 4px; margin-bottom: 5px; }
+.menu-tab {
+  flex: 1 1 0; padding: 5px 6px; border: 0; border-radius: var(--gd-radius); cursor: pointer;
+  font-size: 11px; font-weight: 600; background: transparent;
+  color: var(--vscode-descriptionForeground);
+}
+.menu-tab:hover { background: var(--vscode-list-hoverBackground); }
+.menu-tab.is-active { background: var(--gd-accent); color: var(--gd-accent-fg); }
+.menu-empty { padding: 7px 9px; color: var(--vscode-descriptionForeground); font-size: 12px; }
+.menu-item.is-danger { color: var(--vscode-errorForeground, #f14c4c); }
+.menu-btn {
+  flex: 1 1 0; padding: 6px 8px; border: 0; border-radius: var(--gd-radius); cursor: pointer; font-size: 11px; font-weight: 600;
+  background: var(--vscode-button-secondaryBackground, var(--gd-accent));
+  color: var(--vscode-button-secondaryForeground, var(--gd-accent-fg));
+}
+.menu-btn:hover { background: var(--vscode-button-hoverBackground); }
+.load-more {
+  width: 100%; padding: 9px; border: 0; background: transparent; cursor: pointer;
+  color: var(--vscode-textLink-foreground); font-size: 12px;
+}
+.load-more:hover:not(:disabled) { background: var(--vscode-list-hoverBackground); }
+#conflictBar {
+  flex: 0 0 auto; padding: 8px 12px; font-size: 11px; line-height: 1.45;
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--vscode-inputValidation-warningBackground, rgba(228,103,107,.15));
+  border-bottom: 1px solid var(--vscode-inputValidation-warningBorder, #e4676b);
+}
+#conflictActions { display: flex; gap: 6px; }
+#conflictActions button {
+  flex: 1 1 0; padding: 5px 8px; border: 0; border-radius: var(--gd-radius);
+  cursor: pointer; font-size: 11px; font-weight: 600;
+  background: var(--vscode-button-secondaryBackground, rgba(128,128,128,.25));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+}
+#conflictContinue { background: var(--gd-accent); color: var(--gd-accent-fg); }
+#conflictActions button:disabled { opacity: .45; cursor: default; }
+
+/* ---- commit meta (amend / co-authors) ---- */
+#commitMeta { display: flex; align-items: center; gap: 10px; }
+#coAuthToggle {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border: 0; border-radius: 4px; cursor: pointer;
+  background: transparent; color: var(--vscode-descriptionForeground);
+}
+#coAuthToggle:hover, #coAuthToggle.is-on { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.18)); }
+#amendRow { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--vscode-descriptionForeground); cursor: pointer; }
+#amendRow input { width: 13px; height: 13px; accent-color: var(--gd-accent); }
+#coAuthors {
+  width: 100%; padding: 6px 9px; border-radius: var(--gd-radius); font-size: 12px;
+  background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, var(--gd-border));
+}
+#coAuthors:focus { outline: 0; border-color: var(--vscode-focusBorder); }
+
+/* ---- last commit bar (Committed … · Undo) ---- */
+#lastCommitBar {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 10px; font-size: 11px; color: var(--vscode-descriptionForeground);
+  background: var(--gd-chrome); border-top: 1px solid var(--gd-border);
+}
+#lastCommitText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#undoBtn2 {
+  flex: 0 0 auto; padding: 3px 10px; border: 1px solid var(--gd-border); border-radius: var(--gd-radius);
+  background: transparent; color: var(--vscode-foreground); cursor: pointer; font-size: 11px; font-weight: 600;
+}
+#undoBtn2:hover { background: var(--vscode-list-hoverBackground); }
+
+/* ---- compare bar ---- */
+#compareBar {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 7px 12px; font-size: 11px;
+  background: var(--vscode-list-inactiveSelectionBackground, var(--gd-chrome));
+  border-bottom: 1px solid var(--gd-border);
+}
+#compareText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#compareExit { flex: 0 0 auto; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 13px; opacity: .7; }
+#compareExit:hover { opacity: 1; }
+.compare-section {
+  padding: 6px 12px; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--vscode-descriptionForeground);
+  background: var(--gd-chrome); border-bottom: 1px solid var(--gd-border); position: sticky; top: 0;
+}
+
+.file-row.is-conflict .file-name { color: var(--vscode-errorForeground, #f14c4c); }
+.file-resolve {
+  flex: 0 0 auto; padding: 1px 7px; border: 1px solid var(--gd-border); border-radius: 10px;
+  background: transparent; color: inherit; cursor: pointer; font-size: 10px;
+}
+.file-resolve:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.2)); }
+`;
+
+const SCRIPT = String.raw`
+const vscode = acquireVsCodeApi();
+const post = (command, extra) => vscode.postMessage(Object.assign({ command }, extra || {}));
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]
+));
+
+const state = {
+  repository: (window.__INITIAL__ && window.__INITIAL__.repository) || null,
+  repositories: [],
+  activeRepoPath: null,
+  account: null,
+  changes: [],
+  history: [],
+  branches: [],
+  currentBranch: null,
+  branchActivity: {},
+  remote: null,
+  tab: "changes",
+  selectedFiles: new Set(),
+  selectedPath: null,
+  selectedCommit: null,
+  commitDetail: null,
+  commitFilePath: null,
+  filter: "",
+  hasMore: false,
+  loadingMore: false,
+  operation: null,
+  conflicted: [],
+  canUndo: false,
+  lastCommitSummary: null,
+  stashes: [],
+  amend: false,
+  coAuthors: "",
+  compare: null,
+  prMenuTab: "branches",
+  pullRequests: null,
+  prError: null,
+  prLoading: false,
+};
+
+/* ---------- toolbar ---------- */
+function renderToolbar() {
+  $("repoName").textContent = state.repository ? state.repository.name : "No repository";
+  $("branchName").textContent = state.currentBranch || "—";
+  // (the commit button label — including the branch — is owned by updateCommitBtn)
+
+  const r = state.remote || {};
+  const ico = $("syncIco"), label = $("syncLabel"), count = $("syncCount"), cell = $("syncCell");
+  const svg = { fetch: ${JSON.stringify(ICON.fetch)}, push: ${JSON.stringify(ICON.push)}, pull: ${JSON.stringify(ICON.pull)}, publish: ${JSON.stringify(ICON.publish)} };
+  // Only claim "not published" when we positively know: a remote exists and
+  // git reported no upstream. Anything uncertain (status not received yet)
+  // defaults to Fetch rather than a misleading "Publish branch".
+  let mode = "fetch";
+  if (r.hasRemote === true && r.isPublished === false && r.ahead === 0 && r.behind === 0) mode = "publish";
+  else if (r.ahead > 0 && r.behind > 0) mode = "diverged";
+  else if (r.behind > 0) mode = "pull";
+  else if (r.ahead > 0) mode = "push";
+
+  ico.innerHTML = svg[mode === "diverged" ? "push" : mode];
+  count.hidden = true;
+  const sub = $("syncSub");
+  if (mode === "publish") { label.textContent = "Publish branch"; sub.textContent = "This branch is not on GitHub yet"; }
+  else if (mode === "diverged") { label.textContent = "Diverged"; sub.textContent = "Local and origin differ — click for options"; count.hidden = false; count.textContent = "↑" + r.ahead + " ↓" + r.behind; }
+  else if (mode === "pull") { label.textContent = "Pull origin"; sub.textContent = relFetched(r.lastFetched); count.hidden = false; count.textContent = "↓ " + r.behind; }
+  else if (mode === "push") { label.textContent = "Push origin"; sub.textContent = relFetched(r.lastFetched); count.hidden = false; count.textContent = "↑ " + r.ahead; }
+  else { label.textContent = "Fetch origin"; sub.textContent = relFetched(r.lastFetched); }
+  cell.title = sub.textContent;
+  cell.dataset.mode = mode;
+}
+const SYNC_MENU = [
+  ["fetch", "Fetch origin"],
+  ["pull", "Pull origin"],
+  ["push", "Push origin"],
+  ["forcePush", "Force-push origin (overwrite remote)"],
+];
+function openSyncMenu(x, y) {
+  openMenuAt(x, y, (m) => {
+    for (const [cmd, label] of SYNC_MENU) {
+      const it = document.createElement("div");
+      it.className = "menu-item" + (cmd === "forcePush" ? " is-danger" : "");
+      it.textContent = label;
+      it.onclick = () => { closeMenu(); post(cmd); };
+      m.appendChild(it);
+    }
+  });
+}
+$("syncCell").oncontextmenu = (e) => { e.preventDefault(); openSyncMenu(e.clientX, e.clientY); };
+function relFetched(d) {
+  if (!d) return "Never fetched";
+  const t = new Date(d).getTime();
+  if (isNaN(t)) return "Last fetched recently";
+  const mins = Math.round((Date.now() - t) / 60000);
+  if (mins < 1) return "Last fetched just now";
+  if (mins < 60) return "Last fetched " + mins + "m ago";
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return "Last fetched " + hrs + "h ago";
+  return "Last fetched " + Math.round(hrs / 24) + "d ago";
+}
+
+$("syncCell").onclick = (e) => {
+  const mode = $("syncCell").dataset.mode;
+  if (mode === "diverged") { openSyncMenu(e.clientX, e.clientY); return; }
+  if (mode === "publish") post("publish");
+  else if (mode === "pull") post("pull");
+  else if (mode === "push") post("push");
+  else post("fetch");
+};
+
+/* ---------- tabs ---------- */
+document.querySelectorAll(".tab").forEach((btn) => {
+  btn.onclick = () => {
+    state.tab = btn.dataset.tab;
+    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b === btn));
+    $("pane-changes").hidden = state.tab !== "changes";
+    $("pane-history").hidden = state.tab !== "history";
+    if (state.tab === "changes" && state.selectedCommit) {
+      state.selectedCommit = null;
+      state.commitDetail = null;
+      state.commitFilePath = null;
+    }
+    updateLayout();
+    renderLastCommitBar();
+  };
+});
+
+/* ---------- changed files ---------- */
+function fileParts(p) {
+  const i = p.lastIndexOf("/");
+  return i < 0 ? { dir: "", name: p } : { dir: p.slice(0, i + 1), name: p.slice(i + 1) };
+}
+function statusLetter(st) {
+  const s = (st || "").replace(/\s/g, "");
+  if (s.indexOf("D") >= 0) return "D";
+  if (s.indexOf("A") >= 0 || s === "??" || s.indexOf("?") >= 0) return "A";
+  if (s.indexOf("R") >= 0) return "R";
+  if (s.indexOf("U") >= 0 || s.indexOf("C") >= 0) return "C";
+  return "M";
+}
+function visibleChanges() {
+  const f = state.filter.trim().toLowerCase();
+  return state.changes.filter((c) => !f || c.path.toLowerCase().indexOf(f) >= 0);
+}
+function renderChanges() {
+  const list = $("fileList");
+  const vis = visibleChanges();
+  const has = state.changes.length > 0;
+  $("changesBadge").textContent = state.changes.length;
+  $("noChanges").hidden = has;
+  $("fileList").hidden = !has;
+  // The commit box stays visible even with a clean tree so "Amend last commit"
+  // is reachable (GitHub Desktop behaviour).
+  $("commitBox").hidden = false;
+  $("allRow").hidden = !has;
+  $("filterWrap").hidden = !has;
+
+  const n = state.selectedFiles.size;
+  $("allText").textContent = n + " of " + state.changes.length + " file" + (state.changes.length === 1 ? "" : "s") + " to commit";
+  $("allCheck").checked = state.changes.length > 0 && n === state.changes.length;
+  $("allCheck").indeterminate = n > 0 && n < state.changes.length;
+
+  list.innerHTML = "";
+  for (const c of vis) {
+    const parts = fileParts(c.path);
+    const L = statusLetter(c.status);
+    const isConflict = state.conflicted.indexOf(c.path) >= 0;
+    const row = document.createElement("div");
+    row.className = "file-row" + (state.selectedPath === c.path ? " is-selected" : "") + (isConflict ? " is-conflict" : "");
+    row.innerHTML =
+      '<input type="checkbox" ' + (state.selectedFiles.has(c.path) ? "checked" : "") + (isConflict ? " disabled" : "") + '>' +
+      '<span class="status-sq st-' + (isConflict ? "C" : L) + '">' + (isConflict ? "C" : L) + '</span>' +
+      '<span class="file-name"><span class="file-dir">' + esc(parts.dir) + '</span>' + esc(parts.name) + '</span>' +
+      (isConflict
+        ? '<button class="file-resolve" type="button">Mark resolved</button>'
+        : '<button class="file-x" title="Discard changes" type="button">×</button>');
+    const cb = row.querySelector("input");
+    cb.onclick = (e) => {
+      e.stopPropagation();
+      if (isConflict) return;
+      if (cb.checked) state.selectedFiles.add(c.path); else state.selectedFiles.delete(c.path);
+      renderChanges();
+    };
+    if (isConflict) {
+      row.querySelector(".file-resolve").onclick = (e) => { e.stopPropagation(); post("markResolved", { files: [c.path] }); };
+    } else {
+      row.querySelector(".file-x").onclick = (e) => { e.stopPropagation(); post("discardFiles", { files: [c.path] }); };
+    }
+    row.onclick = () => selectFile(c.path);
+    list.appendChild(row);
+  }
+  updateCommitBtn();
+}
+function applyWidth() {
+  document.body.classList.toggle("narrow", window.innerWidth < 620);
+}
+window.addEventListener("resize", applyWidth);
+
+function updateLayout() {
+  if (state.selectedCommit) {
+    renderCommitDetail();
+    return;
+  }
+  const hasDiff = !!state.selectedPath;
+  const hasChanges = state.changes.length > 0;
+  // Right pane: a file's diff > "pick a file" hint (when there are changes) >
+  // the rich "No local changes" state.
+  $("diffHeader").hidden = !hasDiff;
+  $("diffBody").hidden = !hasDiff && !hasChanges;
+  $("rightEmpty").hidden = hasDiff || hasChanges;
+  if (hasChanges && !hasDiff) {
+    $("diffBody").innerHTML =
+      '<div class="diff-meta" style="padding:16px">Select a file on the left to see its changes.</div>';
+  }
+  if (!hasDiff && !hasChanges) renderRightEmpty();
+}
+
+const CARD_ICO = { linkExt: ${JSON.stringify(ICON.linkExt)} };
+function renderRightEmpty() {
+  const host = $("emptyCards");
+  host.innerHTML = "";
+  const r = state.remote || {};
+  const card = (primary, title, desc, btn, onClick, icoHtml) => {
+    const el = document.createElement("div");
+    el.className = "empty-card" + (primary ? " is-primary" : "");
+    el.innerHTML =
+      '<div class="empty-card-body"><div class="empty-card-title">' + esc(title) + '</div>' +
+      '<div class="empty-card-desc">' + esc(desc) + '</div></div>' +
+      '<button class="empty-card-btn" type="button">' + (icoHtml || "") + esc(btn) + '</button>';
+    el.querySelector("button").onclick = onClick;
+    host.appendChild(el);
+  };
+
+  const mode = $("syncCell").dataset.mode;
+  if (mode === "publish") {
+    card(true, "Publish your branch", "This branch is not on GitHub yet. Publish it to share and open a pull request.", "Publish branch", () => post("publish"));
+  } else if (mode === "push") {
+    card(true, "Push commits to origin", "You have local commits waiting to be pushed to GitHub.", "Push origin", () => post("push"));
+  } else if (mode === "pull") {
+    card(true, "Pull from origin", "origin has commits you don't have locally.", "Pull origin", () => post("pull"));
+  } else if (mode === "diverged") {
+    card(true, "Your branch has diverged", "Local and origin have both moved. Review the options before pushing.", "Sync options", (e) => openSyncMenu(e.clientX, e.clientY));
+  }
+  if (state.currentBranch) {
+    card(false, "Open a pull request", "Start a pull request for " + state.currentBranch + " on GitHub.", "Create pull request", () => post("createPullRequest", { branch: state.currentBranch }), CARD_ICO.linkExt);
+  }
+  if (state.repository && state.repository.remote) {
+    card(false, "View this repository on GitHub", "Open the repository page in your browser.", "View on GitHub", () => post("openRepoOnGitHub"), CARD_ICO.linkExt);
+  }
+}
+function selectFile(p) {
+  state.selectedPath = p;
+  state.selectedCommit = null;
+  renderChanges();
+  updateLayout();
+  $("diffHeader").hidden = false;
+  $("diffPath").textContent = p;
+  $("diffBody").innerHTML = '<div class="diff-meta" style="padding:8px">Loading…</div>';
+  post("getWorkingDiff", { filePath: p });
+}
+$("allCheck").onclick = () => {
+  if ($("allCheck").checked) state.changes.forEach((c) => state.selectedFiles.add(c.path));
+  else state.selectedFiles.clear();
+  renderChanges();
+};
+$("filter").oninput = (e) => { state.filter = e.target.value; renderChanges(); };
+
+/* ---------- commit ---------- */
+function coAuthorTrailers() {
+  const raw = state.coAuthors.trim();
+  if (!raw) return "";
+  const parts = raw.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  const lines = parts.map((p) => {
+    const m = p.match(/^(.*?)\s*<([^>]+)>$/);
+    if (m) return "Co-Authored-By: " + m[1].trim() + " <" + m[2].trim() + ">";
+    const h = p.replace(/^@/, "");
+    return "Co-Authored-By: " + h + " <" + h + "@users.noreply.github.com>";
+  });
+  return lines.length ? "\n\n" + lines.join("\n") : "";
+}
+function updateCommitBtn() {
+  const n = state.selectedFiles.size;
+  const hasMsg = $("summary").value.trim().length > 0;
+  const ok = hasMsg && (state.amend || n > 0);
+  const btn = $("commitBtn");
+  btn.disabled = !ok;
+  if (state.amend) {
+    btn.innerHTML = "Amend last commit" + (n > 0 ? " (+" + n + " file" + (n === 1 ? "" : "s") + ")" : "");
+  } else {
+    btn.innerHTML = "Commit " + (n > 0 ? n + " file" + (n === 1 ? "" : "s") + " " : "") +
+      "to <strong>" + esc(state.currentBranch || "branch") + "</strong>";
+  }
+}
+$("summary").oninput = updateCommitBtn;
+function doCommit() {
+  const summary = $("summary").value.trim();
+  const n = state.selectedFiles.size;
+  if (!summary || (!state.amend && n === 0)) return;
+  const desc = $("description").value.trim();
+  const message = summary + (desc ? "\n\n" + desc : "") + coAuthorTrailers();
+  const files = Array.from(state.selectedFiles);
+  post(state.amend ? "amendCommit" : "commitFiles", { message: message, files: files });
+  $("commitBtn").disabled = true;
+  // Inputs cleared only on the "commitSucceeded" ack.
+}
+$("commitBtn").onclick = doCommit;
+["summary", "description", "coAuthors"].forEach((id) => {
+  $(id).addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
+  });
+});
+$("coAuthors").oninput = (e) => { state.coAuthors = e.target.value; };
+$("coAuthToggle").onclick = () => {
+  const el = $("coAuthors");
+  el.hidden = !el.hidden;
+  $("coAuthToggle").classList.toggle("is-on", !el.hidden);
+  $("coAuthToggle").title = el.hidden ? "Add co-authors" : "Hide co-authors";
+  if (!el.hidden) el.focus();
+};
+$("amendCheck").onchange = (e) => {
+  state.amend = e.target.checked;
+  if (state.amend && !$("summary").value.trim() && state.lastCommitSummary) {
+    $("summary").value = state.lastCommitSummary;
+  }
+  updateCommitBtn();
+};
+$("undoBtn2").onclick = () => post("undoLastCommit");
+$("conflictAbort").onclick = () => post("abortOperation");
+$("conflictContinue").onclick = () => post("continueOperation");
+
+/* ---------- operation / undo bars ---------- */
+function renderOperation() {
+  const bar = $("conflictBar");
+  if (!state.operation) { bar.hidden = true; return; }
+  bar.hidden = false;
+  const nc = state.conflicted.length;
+  $("conflictText").textContent = nc > 0
+    ? "⚠ " + state.operation + " paused — " + nc + " file(s) in conflict. Resolve each, then Continue."
+    : "✔ All conflicts resolved. Click Continue to finish the " + state.operation + ".";
+  $("conflictContinue").disabled = nc > 0;
+  if (state.operation) { state.tab = "changes"; $("pane-changes").hidden = false; $("pane-history").hidden = true;
+    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === "changes")); }
+}
+function renderLastCommitBar() {
+  const show = !state.operation && state.canUndo && !!state.lastCommitSummary;
+  $("lastCommitBar").hidden = !show;
+  if (show) $("lastCommitText").textContent = 'Committed "' + (state.lastCommitSummary || "") + '"';
+}
+
+/* ---------- history ---------- */
+function commitRow(c) {
+  const row = document.createElement("div");
+  row.className = "commit-row" + (state.selectedCommit === c.hash ? " is-selected" : "");
+  row.innerHTML =
+    '<div class="commit-msg">' + esc((c.message || "").split("\n")[0]) + "</div>" +
+    '<div class="commit-meta">' + (c.isPushed === false ? '<span class="unpushed-dot"></span>' : "") +
+    esc(c.authorName || c.author || "") + " · " + esc(c.relativeTime || "") + "</div>";
+  row.onclick = () => {
+    state.selectedCommit = c.hash;
+    state.selectedPath = null;
+    state.commitDetail = null;
+    state.commitFilePath = null;
+    renderHistory();
+    $("diffHeader").hidden = false;
+    $("diffPath").textContent = (c.message || "").split("\n")[0];
+    $("rightEmpty").hidden = true;
+    $("diffBody").hidden = false;
+    $("diffBody").innerHTML = '<div class="diff-meta" style="padding:12px">Loading…</div>';
+    post("getCommitDetails", { hash: c.hash });
+  };
+  row.oncontextmenu = (e) => { e.preventDefault(); openCommitMenu(e.clientX, e.clientY, c); };
+  return row;
+}
+function renderHistory() {
+  const list = $("commitList");
+  list.innerHTML = "";
+
+  if (state.compare) {
+    $("compareBar").hidden = false;
+    $("compareText").textContent = "Comparing " + (state.currentBranch || "HEAD") + " ⇄ " + state.compare.branch;
+    $("noHistory").hidden = true;
+    const section = (title, commits) => {
+      const h = document.createElement("div");
+      h.className = "compare-section";
+      h.textContent = title + " (" + commits.length + ")";
+      list.appendChild(h);
+      if (!commits.length) {
+        const e = document.createElement("div"); e.className = "menu-empty"; e.textContent = "none"; list.appendChild(e);
+      }
+      for (const c of commits) list.appendChild(commitRow(c));
+    };
+    section("On " + (state.currentBranch || "HEAD") + ", not on " + state.compare.branch, state.compare.ahead);
+    section("On " + state.compare.branch + ", not here", state.compare.behind);
+    return;
+  }
+
+  $("compareBar").hidden = true;
+  $("noHistory").hidden = state.history.length > 0;
+  for (const c of state.history) list.appendChild(commitRow(c));
+  if (state.hasMore) {
+    const more = document.createElement("button");
+    more.className = "load-more"; more.type = "button";
+    more.textContent = state.loadingMore ? "Loading…" : "Load more commits";
+    more.disabled = state.loadingMore;
+    more.onclick = loadMore;
+    list.appendChild(more);
+  }
+}
+$("compareExit").onclick = () => { state.compare = null; renderHistory(); renderLastCommitBar(); };
+function loadMore() {
+  if (state.compare || state.loadingMore || !state.hasMore) return;
+  state.loadingMore = true;
+  renderHistory();
+  post("loadMoreCommits", { offset: state.history.length });
+}
+$("commitList").addEventListener("scroll", () => {
+  const el = $("commitList");
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) loadMore();
+});
+
+const COMMIT_MENU = [
+  ["checkout", "Checkout this commit"],
+  ["createBranch", "Create branch from commit…"],
+  ["createTag", "Create tag…"],
+  ["sep"],
+  ["cherryPick", "Cherry-pick to current branch"],
+  ["revert", "Revert this commit"],
+  ["reset", "Reset current branch to here"],
+  ["sep"],
+  ["copySha", "Copy SHA"],
+  ["viewOnGitHub", "View on GitHub"],
+];
+function openCommitMenu(x, y, commit) {
+  openMenuAt(x, y, (m) => {
+    for (const entry of COMMIT_MENU) {
+      if (entry[0] === "sep") { const s = document.createElement("div"); s.className = "menu-sep"; m.appendChild(s); continue; }
+      const it = document.createElement("div");
+      it.className = "menu-item" + (entry[0] === "reset" ? " is-danger" : "");
+      it.textContent = entry[1];
+      it.onclick = () => { closeMenu(); runCommitAction(entry[0], commit); };
+      m.appendChild(it);
+    }
+  });
+}
+function runCommitAction(action, commit) {
+  const h = commit.hash;
+  switch (action) {
+    case "checkout": post("checkoutCommit", { hash: h }); break;
+    case "createBranch": post("createBranchFromCommit", { hash: h }); break;
+    case "createTag": post("createTagFromCommit", { hash: h }); break;
+    case "cherryPick": post("cherryPickCommit", { hash: h }); break;
+    case "revert": post("revertCommit", { hash: h }); break;
+    case "reset": post("resetToCommit", { hash: h }); break;
+    case "copySha": navigator.clipboard && navigator.clipboard.writeText(h); break;
+    case "viewOnGitHub": post("viewCommitOnGitHub", { hash: h }); break;
+  }
+}
+
+/* ---------- commit detail (right pane) ---------- */
+function exitCommitDetail() {
+  state.selectedCommit = null;
+  state.commitDetail = null;
+  state.commitFilePath = null;
+  renderHistory();
+  updateLayout();
+}
+function renderCommitDetail() {
+  $("rightEmpty").hidden = true;
+  $("diffHeader").hidden = false;
+  $("diffBody").hidden = false;
+  const d = state.commitDetail;
+  const s = d && d.summary;
+  $("diffPath").textContent = s ? (s.message || "").split("\n")[0] : "Commit";
+  if (!d) return;
+  if (state.commitFilePath) return; // a file diff is showing
+
+  const body = $("diffBody");
+  const stat =
+    '<span class="cd-add">+' + (s.additions || 0) + '</span> ' +
+    '<span class="cd-del">-' + (s.deletions || 0) + '</span> · ' +
+    (s.fileCount || d.files.length) + ' file' + ((s.fileCount || d.files.length) === 1 ? '' : 's');
+  let html =
+    '<div class="cd-head">' +
+    '<div class="cd-subject">' + esc((s.message || "").split("\n")[0]) + '</div>' +
+    '<div class="cd-meta">' + esc(s.authorName || "") + ' · ' + esc(s.relativeTime || "") +
+    ' · <span class="cd-sha">' + esc(s.shortHash || (s.hash || state.selectedCommit).slice(0, 7)) + '</span></div>' +
+    '<div class="cd-meta">' + stat + '</div>' +
+    '</div><div class="cd-files">';
+  for (const f of d.files) {
+    const n =
+      (f.additions != null ? '<span class="cd-add">+' + f.additions + '</span> ' : '') +
+      (f.deletions != null ? '<span class="cd-del">-' + f.deletions + '</span>' : '');
+    html +=
+      '<div class="cd-file" data-path="' + esc(f.path) + '">' +
+      '<span class="cd-file-path">' + esc(f.path) + '</span>' +
+      '<span class="cd-file-stat">' + n + '</span></div>';
+  }
+  html += '</div>';
+  body.innerHTML = html;
+  body.scrollTop = 0;
+  body.querySelectorAll(".cd-file").forEach((el) => {
+    el.onclick = () => {
+      state.commitFilePath = el.dataset.path;
+      body.innerHTML = '<div class="diff-meta" style="padding:12px">Loading…</div>';
+      post("selectFile", { hash: state.selectedCommit, path: el.dataset.path });
+    };
+  });
+}
+function renderCommitFileDiff(diff) {
+  const body = $("diffBody");
+  body.innerHTML =
+    '<div class="cd-back"><button type="button" id="cdBack">‹ All files</button>' +
+    '<span class="cd-back-path">' + esc(state.commitFilePath || "") + '</span></div>' +
+    '<div id="cdDiff"></div>';
+  $("cdBack").onclick = () => { state.commitFilePath = null; renderCommitDetail(); };
+  renderDiffInto($("cdDiff"), diff);
+}
+
+/* ---------- diff rendering ---------- */
+function renderDiff(text) {
+  renderDiffInto($("diffBody"), text);
+}
+// Token-level LCS, used to highlight the exact words that changed between a
+// removed line and the added line that replaced it (like VS Code's diff editor).
+function wordDiff(a, b) {
+  const split = (s) => s.match(/\s+|\w+|[^\s\w]/g) || [];
+  const at = split(a), bt = split(b);
+  const n = at.length, m = bt.length;
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = at[i] === bt[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const aOut = [], bOut = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (at[i] === bt[j]) { aOut.push([0, at[i]]); bOut.push([0, bt[j]]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { aOut.push([-1, at[i]]); i++; }
+    else { bOut.push([1, bt[j]]); j++; }
+  }
+  while (i < n) aOut.push([-1, at[i++]]);
+  while (j < m) bOut.push([1, bt[j++]]);
+  return [aOut, bOut];
+}
+function paintTokens(tokens, changedCls) {
+  let html = "";
+  for (const [flag, tok] of tokens) {
+    html += flag === 0 ? esc(tok) : '<span class="' + changedCls + '">' + esc(tok) + "</span>";
+  }
+  return html;
+}
+
+function renderDiffInto(body, text) {
+  if (!text || !text.trim()) {
+    body.innerHTML = '<div class="diff-meta" style="padding:8px">No textual changes (binary file or whitespace only).</div>';
+    return;
+  }
+  const src = text.split("\n");
+  // Parse into typed rows first so we can pair adjacent -/+ runs for word diff.
+  const rows = [];
+  let oldNo = 0, newNo = 0;
+  for (const raw of src) {
+    if (raw.indexOf("@@") === 0) {
+      const m = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/);
+      if (m) { oldNo = +m[1]; newNo = +m[2]; }
+      rows.push({ t: "hunk", text: m ? m[3].trim() || raw : raw });
+    } else if (/^(diff |index |--- |\+\+\+ |new file|deleted file|similarity |rename |Binary )/.test(raw)) {
+      continue; // file headers are shown in the pane header already
+    } else if (raw.charAt(0) === "+") {
+      rows.push({ t: "add", n: newNo++, text: raw.slice(1) });
+    } else if (raw.charAt(0) === "-") {
+      rows.push({ t: "del", o: oldNo++, text: raw.slice(1) });
+    } else {
+      rows.push({ t: "ctx", o: oldNo++, n: newNo++, text: raw.slice(1) });
+    }
+  }
+
+  let out = "";
+  const cell = (o, n, sign, cls, inner) =>
+    '<div class="dl ' + cls + '">' +
+    '<span class="dg">' + (o == null ? "" : o) + '</span>' +
+    '<span class="dg">' + (n == null ? "" : n) + '</span>' +
+    '<span class="ds">' + sign + '</span>' +
+    '<span class="dt">' + inner + '</span></div>';
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (r.t === "hunk") { out += '<div class="dl dh"><span class="dt">' + esc(r.text) + '</span></div>'; continue; }
+    if (r.t === "ctx") { out += cell(r.o + 1, r.n + 1, " ", "", esc(r.text) || " "); continue; }
+    if (r.t === "del") {
+      // collect the del run and the following add run
+      const dels = []; while (i < rows.length && rows[i].t === "del") dels.push(rows[i++]);
+      const adds = []; while (i < rows.length && rows[i].t === "add") adds.push(rows[i++]);
+      i--;
+      for (let k = 0; k < dels.length; k++) {
+        const d = dels[k], pair = adds[k];
+        const inner = pair ? paintTokens(wordDiff(d.text, pair.text)[0], "dw-del") : (esc(d.text) || " ");
+        out += cell(d.o + 1, null, "-", "d-del", inner);
+      }
+      for (let k = 0; k < adds.length; k++) {
+        const a = adds[k], pair = dels[k];
+        const inner = pair ? paintTokens(wordDiff(pair.text, a.text)[1], "dw-add") : (esc(a.text) || " ");
+        out += cell(null, a.n + 1, "+", "d-add", inner);
+      }
+      continue;
+    }
+    if (r.t === "add") { out += cell(null, r.n + 1, "+", "d-add", esc(r.text) || " "); continue; }
+  }
+  body.innerHTML = out || '<div class="diff-meta" style="padding:8px">No changes.</div>';
+  body.scrollTop = 0;
+}
+
+/* ---------- dropdown menus ---------- */
+const menu = $("menu");
+let redrawBranchMenu = null;
+function closeMenu() { menu.hidden = true; menu.innerHTML = ""; document.removeEventListener("mousedown", onDocDown, true); redrawBranchMenu = null; }
+function onDocDown(e) { if (!menu.contains(e.target)) closeMenu(); }
+function openMenu(anchor, build) {
+  menu.innerHTML = ""; build(menu);
+  menu.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  menu.style.visibility = "hidden";
+  requestAnimationFrame(() => {
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let x = r.left, y = r.bottom + 2;
+    if (x + mw > window.innerWidth - 8) x = window.innerWidth - 8 - mw;
+    if (y + mh > window.innerHeight - 8) y = Math.max(8, r.top - 2 - mh);
+    menu.style.left = Math.max(8, x) + "px";
+    menu.style.top = Math.max(8, y) + "px";
+    menu.style.visibility = "";
+  });
+  setTimeout(() => document.addEventListener("mousedown", onDocDown, true), 0);
+}
+function openMenuAt(x, y, build) {
+  menu.innerHTML = ""; build(menu);
+  menu.hidden = false;
+  menu.style.visibility = "hidden";
+  requestAnimationFrame(() => {
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let nx = x, ny = y;
+    if (nx + mw > window.innerWidth - 8) nx = window.innerWidth - 8 - mw;
+    if (ny + mh > window.innerHeight - 8) ny = Math.max(8, window.innerHeight - 8 - mh);
+    menu.style.left = Math.max(8, nx) + "px";
+    menu.style.top = Math.max(8, ny) + "px";
+    menu.style.visibility = "";
+  });
+  setTimeout(() => document.addEventListener("mousedown", onDocDown, true), 0);
+}
+
+$("branchCell").onclick = () => {
+  openMenu($("branchCell"), (m) => {
+    const tabs = document.createElement("div");
+    tabs.className = "menu-tabs";
+    const mkTab = (id, label) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = label;
+      b.className = "menu-tab" + (state.prMenuTab === id ? " is-active" : "");
+      b.onclick = () => {
+        state.prMenuTab = id;
+        if (id === "prs") { state.prLoading = true; state.prError = null; post("getPullRequests"); }
+        rebuild();
+      };
+      tabs.appendChild(b);
+    };
+    mkTab("branches", "Branches");
+    mkTab("prs", "Pull requests");
+
+    const rebuild = () => { closeMenu(); $("branchCell").onclick(); };
+    redrawBranchMenu = () => {
+      if (state.prMenuTab === "prs") { closeMenu(); $("branchCell").onclick(); }
+    };
+
+    m.appendChild(tabs);
+
+    if (state.prMenuTab === "prs") {
+      renderPrMenu(m);
+      return;
+    }
+
+    const mkAction = (label, fn) => {
+      const it = document.createElement("div");
+      it.className = "menu-item"; it.textContent = label;
+      it.onclick = () => { closeMenu(); fn(); };
+      m.appendChild(it);
+    };
+    mkAction("＋  New branch…", startNewBranch);
+    if (state.currentBranch && state.branches.filter((b) => !b.startsWith("remotes/")).length > 1) {
+      mkAction("⑂  Merge into current branch…", startMergeBranch);
+    }
+    if (state.currentBranch) mkAction("⇡  Create pull request…", () => post("createPullRequest", { branch: state.currentBranch }));
+    if (state.changes.length > 0) mkAction("⇩  Stash all changes", () => post("stashPush", { message: "" }));
+    for (const s of state.stashes) {
+      const it = document.createElement("div");
+      it.className = "menu-item";
+      it.innerHTML = '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">↤ ' + esc(s.message || ("stash@{" + s.index + "}")) + '</span>' +
+        '<button class="file-resolve" data-a="pop">Pop</button><button class="file-resolve" data-a="drop">✕</button>';
+      it.querySelector('[data-a=pop]').onclick = (e) => { e.stopPropagation(); closeMenu(); post("stashApply", { index: s.index, drop: true }); };
+      it.querySelector('[data-a=drop]').onclick = (e) => { e.stopPropagation(); closeMenu(); post("stashDrop", { index: s.index }); };
+      m.appendChild(it);
+    }
+    const sep = document.createElement("div"); sep.className = "menu-sep"; m.appendChild(sep);
+
+    const filter = document.createElement("input");
+    filter.className = "menu-filter"; filter.placeholder = "Find a branch…";
+    m.appendChild(filter);
+    const holder = document.createElement("div");
+    m.appendChild(holder);
+    const draw = () => {
+      const q = filter.value.trim().toLowerCase();
+      holder.innerHTML = "";
+      const items = state.branches.filter((b) => !q || b.toLowerCase().indexOf(q) >= 0);
+      if (!items.length) { holder.innerHTML = '<div class="menu-empty">No branches</div>'; return; }
+      for (const b of items) {
+        const it = document.createElement("div");
+        const isCur = b === state.currentBranch;
+        it.className = "menu-item" + (isCur ? " is-current" : "");
+        it.innerHTML = '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(b) + (isCur ? "  (current)" : "") + '</span>';
+        it.onclick = () => { closeMenu(); if (!isCur) post("checkoutBranch", { branch: b }); };
+        if (!isCur) {
+          const cmp = document.createElement("button");
+          cmp.className = "file-resolve"; cmp.type = "button"; cmp.textContent = "⇄";
+          cmp.title = "Compare with this branch";
+          cmp.onclick = (e) => { e.stopPropagation(); closeMenu(); post("compareBranch", { branch: b }); };
+          it.appendChild(cmp);
+        }
+        holder.appendChild(it);
+      }
+    };
+    filter.oninput = draw; draw();
+    setTimeout(() => filter.focus(), 0);
+  });
+};
+
+function renderPrMenu(m) {
+  if (state.prLoading && !state.pullRequests) {
+    const d = document.createElement("div"); d.className = "menu-empty"; d.textContent = "Loading pull requests…";
+    m.appendChild(d); return;
+  }
+  if (state.prError) {
+    const d = document.createElement("div"); d.className = "menu-empty"; d.textContent = state.prError;
+    m.appendChild(d); return;
+  }
+  const prs = state.pullRequests || [];
+  if (!prs.length) {
+    const d = document.createElement("div"); d.className = "menu-empty"; d.textContent = "No open pull requests";
+    m.appendChild(d); return;
+  }
+  const filter = document.createElement("input");
+  filter.className = "menu-filter"; filter.placeholder = "Find a pull request…";
+  m.appendChild(filter);
+  const holder = document.createElement("div"); m.appendChild(holder);
+  const draw = () => {
+    const q = filter.value.trim().toLowerCase();
+    holder.innerHTML = "";
+    const items = prs.filter((p) => !q ||
+      ("#" + p.number).indexOf(q) >= 0 ||
+      p.title.toLowerCase().indexOf(q) >= 0 ||
+      (p.author || "").toLowerCase().indexOf(q) >= 0);
+    if (!items.length) { holder.innerHTML = '<div class="menu-empty">No matches</div>'; return; }
+    for (const p of items) {
+      const it = document.createElement("div");
+      it.className = "menu-item";
+      it.innerHTML =
+        '<span style="flex:1;min-width:0">' +
+        '<span style="display:block;overflow:hidden;text-overflow:ellipsis">#' + p.number + '  ' + esc(p.title) +
+        (p.isDraft ? ' <span style="opacity:.5">(draft)</span>' : '') + '</span>' +
+        '<span style="display:block;font-size:10px;opacity:.55;overflow:hidden;text-overflow:ellipsis">by ' +
+        esc(p.author || "?") + (p.isFork ? " · fork" : "") + " · " + esc(p.headRef) + '</span></span>';
+      it.onclick = () => { closeMenu(); post("checkoutPullRequest", { number: p.number }); };
+      holder.appendChild(it);
+    }
+  };
+  filter.oninput = draw; draw();
+  setTimeout(() => filter.focus(), 0);
+}
+
+function startNewBranch() {
+  openMenu($("branchCell"), (m) => {
+    const input = document.createElement("input");
+    input.className = "menu-filter"; input.placeholder = "New branch name";
+    m.appendChild(input);
+    const dirty = state.changes.length > 0;
+    const hint = document.createElement("div");
+    hint.className = "menu-empty";
+    hint.textContent = dirty
+      ? "You have uncommitted changes — choose what to do:"
+      : "Press Enter to create from " + (state.currentBranch || "HEAD");
+    m.appendChild(hint);
+    const submit = (bringChanges) => {
+      const name = input.value.trim();
+      if (!name) return;
+      closeMenu();
+      if (dirty) post("createBranchWithChanges", { branchName: name, bringChanges: bringChanges });
+      else post("createBranch", { branchName: name });
+    };
+    if (dirty) {
+      const row = document.createElement("div"); row.style.display = "flex"; row.style.gap = "4px"; row.style.padding = "4px";
+      const a = document.createElement("button"); a.className = "menu-btn"; a.type = "button"; a.textContent = "Bring changes";
+      a.onclick = () => submit(true);
+      const b = document.createElement("button"); b.className = "menu-btn"; b.type = "button"; b.textContent = "Stash them";
+      b.onclick = () => submit(false);
+      row.appendChild(a); row.appendChild(b); m.appendChild(row);
+    }
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submit(true); } });
+    setTimeout(() => input.focus(), 0);
+  });
+}
+
+function startMergeBranch() {
+  openMenu($("branchCell"), (m) => {
+    const into = state.currentBranch || "HEAD";
+    const hint = document.createElement("div");
+    hint.className = "menu-empty";
+    hint.textContent = "Merge a branch into " + into + ":";
+    m.appendChild(hint);
+
+    const filter = document.createElement("input");
+    filter.className = "menu-filter"; filter.placeholder = "Find a branch to merge…";
+    m.appendChild(filter);
+    const holder = document.createElement("div"); m.appendChild(holder);
+    const candidates = state.branches.filter((b) => b !== state.currentBranch);
+    const draw = () => {
+      const q = filter.value.trim().toLowerCase();
+      holder.innerHTML = "";
+      const items = candidates.filter((b) => !q || b.toLowerCase().indexOf(q) >= 0);
+      if (!items.length) { holder.innerHTML = '<div class="menu-empty">No other branches</div>'; return; }
+      for (const b of items) {
+        const it = document.createElement("div");
+        it.className = "menu-item";
+        it.innerHTML = '<span style="flex:1;overflow:hidden;text-overflow:ellipsis">' + esc(b) + '</span>';
+        it.onclick = () => {
+          closeMenu();
+          post("mergeBranch", { fromBranch: b, toBranch: state.currentBranch });
+        };
+        holder.appendChild(it);
+      }
+    };
+    filter.oninput = draw; draw();
+    setTimeout(() => filter.focus(), 0);
+  });
+}
+
+$("repoCell").onclick = () => {
+  openMenu($("repoCell"), (m) => {
+    const repos = state.repositories || [];
+    if (repos.length > 1 || (repos.length && repos[0].path !== state.activeRepoPath)) {
+      const filter = document.createElement("input");
+      filter.className = "menu-filter"; filter.placeholder = "Find a repository…";
+      m.appendChild(filter);
+      const holder = document.createElement("div"); m.appendChild(holder);
+      const draw = () => {
+        const q = filter.value.trim().toLowerCase();
+        holder.innerHTML = "";
+        const items = repos.filter((r) => !q || r.name.toLowerCase().indexOf(q) >= 0 || r.path.toLowerCase().indexOf(q) >= 0);
+        if (!items.length) { holder.innerHTML = '<div class="menu-empty">No repositories</div>'; return; }
+        for (const r of items) {
+          const isCur = r.path === state.activeRepoPath;
+          const it = document.createElement("div");
+          it.className = "menu-item" + (isCur ? " is-current" : "");
+          it.innerHTML = '<span style="flex:1;min-width:0"><span style="display:block;overflow:hidden;text-overflow:ellipsis">' + esc(r.name) + (isCur ? "  (current)" : "") +
+            '</span><span style="display:block;font-size:10px;opacity:.55;overflow:hidden;text-overflow:ellipsis">' + esc(r.path) + '</span></span>';
+          it.onclick = () => { closeMenu(); if (!isCur) post("selectRepository", { path: r.path }); };
+          holder.appendChild(it);
+        }
+      };
+      filter.oninput = draw; draw();
+      setTimeout(() => filter.focus(), 0);
+    } else if (repos.length === 1) {
+      const it = document.createElement("div");
+      it.className = "menu-item is-current";
+      it.innerHTML = '<span style="overflow:hidden;text-overflow:ellipsis">' + esc(repos[0].path) + '</span>';
+      m.appendChild(it);
+    }
+    const sep = document.createElement("div"); sep.className = "menu-sep"; m.appendChild(sep);
+    const add = (label, cmd) => {
+      const it = document.createElement("div");
+      it.className = "menu-item"; it.textContent = label;
+      it.onclick = () => { closeMenu(); post(cmd); };
+      m.appendChild(it);
+    };
+    add("＋  Add local repository…", "addLocalRepository");
+    add("⤓  Clone repository…", "cloneRepository");
+  });
+};
+
+/* ---------- inbound messages ---------- */
+window.addEventListener("message", (ev) => {
+  const msg = ev.data || {};
+  switch (msg.command || msg.type) {
+    case "updateChanges": {
+      const prevPaths = new Set(state.changes.map((c) => c.path));
+      state.changes = msg.changes || [];
+      const paths = new Set(state.changes.map((c) => c.path));
+      // Auto-check newly appeared files (GitHub Desktop checks everything by default),
+      // keep the user's choices for files that were already listed.
+      state.selectedFiles = new Set(
+        Array.from(state.selectedFiles).filter((p) => paths.has(p)),
+      );
+      state.changes.forEach((c) => {
+        if (!prevPaths.has(c.path)) state.selectedFiles.add(c.path);
+      });
+      if (state.selectedPath && !paths.has(state.selectedPath)) {
+        state.selectedPath = null;
+        $("diffHeader").hidden = true;
+      }
+      if (!state.changes.some((c) => /[UC]/.test(c.status || ""))) $("conflictBar").hidden = true;
+      renderChanges();
+      updateLayout();
+      break;
+    }
+    case "updateHistory":
+      state.history = msg.history || [];
+      state.hasMore = !!msg.hasMoreCommits;
+      state.loadingMore = false;
+      state.compare = null;
+      if (state.selectedCommit && !state.history.some((c) => c.hash === state.selectedCommit)) {
+        state.selectedCommit = null;
+        state.commitDetail = null;
+        state.commitFilePath = null;
+        updateLayout();
+      }
+      renderHistory();
+      break;
+    case "loadMoreCommitsResponse": {
+      const seen = new Set(state.history.map((c) => c.hash));
+      state.history = state.history.concat((msg.history || []).filter((c) => !seen.has(c.hash)));
+      state.hasMore = !!msg.hasMoreCommits;
+      state.loadingMore = false;
+      renderHistory();
+      break;
+    }
+    case "commitSucceeded":
+      $("summary").value = ""; $("description").value = ""; $("coAuthors").value = "";
+      state.coAuthors = "";
+      state.selectedFiles.clear();
+      state.amend = false; $("amendCheck").checked = false;
+      updateCommitBtn();
+      break;
+    case "mergeConflict":
+      // Detailed state arrives via updateOperation on the following refresh;
+      // this just flips to the Changes tab immediately.
+      state.tab = "changes";
+      $("pane-changes").hidden = false; $("pane-history").hidden = true;
+      document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === "changes"));
+      break;
+    case "updateOperation":
+      state.operation = msg.operation || null;
+      state.conflicted = msg.conflicted || [];
+      state.canUndo = !!msg.canUndo;
+      state.lastCommitSummary = msg.lastCommitSummary || null;
+      renderOperation(); renderChanges(); renderLastCommitBar();
+      break;
+    case "updateStashes":
+      state.stashes = msg.stashes || [];
+      break;
+    case "updatePullRequests":
+      state.prLoading = false;
+      state.pullRequests = msg.pullRequests || [];
+      state.prError = msg.error || null;
+      if (redrawBranchMenu) redrawBranchMenu();
+      break;
+    case "branchComparison":
+      state.compare = { branch: msg.branch, ahead: msg.ahead || [], behind: msg.behind || [] };
+      state.tab = "history";
+      $("pane-changes").hidden = true; $("pane-history").hidden = false;
+      document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === "history"));
+      renderHistory(); renderLastCommitBar();
+      break;
+    case "updateBranches":
+      state.branches = msg.branches || [];
+      state.currentBranch = msg.currentBranch || null;
+      state.branchActivity = msg.branchActivity || {};
+      renderToolbar(); updateCommitBtn(); updateLayout();
+      break;
+    case "updateRepository":
+      state.repository = msg.repository || null;
+      renderToolbar(); setAvatar(); updateLayout();
+      break;
+    case "updateRepositoryList":
+      state.repositories = msg.repositories || [];
+      state.activeRepoPath = msg.activePath || null;
+      break;
+    case "updateAccounts":
+      state.account = msg.activeAccount || null;
+      setAvatar();
+      break;
+    case "updateRemoteStatus":
+      state.remote = msg.remoteStatus || null;
+      renderToolbar(); updateLayout();
+      break;
+    case "commitDetail":
+      state.commitDetail = msg.payload || null;
+      if (state.selectedCommit) renderCommitDetail();
+      break;
+    case "workingDiff":
+      if (msg.payload && msg.payload.path === state.selectedPath) renderDiff(msg.payload.diff);
+      break;
+    case "fileDiff":
+      if (!msg.payload) break;
+      if (state.selectedCommit && state.commitFilePath === msg.payload.path) {
+        renderCommitFileDiff(msg.payload.diff);
+      } else if (!state.selectedCommit) {
+        renderDiff(msg.payload.diff);
+      }
+      break;
+    case "error":
+      if (state.selectedCommit || state.selectedPath) {
+        $("diffBody").innerHTML = '<div class="diff-meta" style="padding:8px">' + esc(msg.message || "Error") + "</div>";
+      }
+      break;
+  }
+});
+
+/* ---------- avatar ---------- */
+function setAvatar() {
+  const a = state.account;
+  const el = $("avatar");
+  if (a && a.avatarUrl) {
+    el.innerHTML = '<img alt="" src="' + esc(a.avatarUrl) + '">';
+    el.title = a.login || "";
+    return;
+  }
+  const s = (a && (a.name || a.login)) || (state.repository && state.repository.name) || "?";
+  el.textContent = s.slice(0, 2);
+  el.title = (a && a.login) || "";
+}
+applyWidth();
+setAvatar();
+renderToolbar();
+renderOperation();
+renderLastCommitBar();
+updateLayout();
+post("ready");
+`;

@@ -1,8 +1,8 @@
 {
   "name": "vscode-github-desktop",
   "displayName": "GitHub Desktop",
-  "description": "A comprehensive VS Code extension that brings GitHub Desktop's complete workflow experience, featuring React-based UI, advanced commit management, branch operations, and multi-account support.",
-  "version": "1.1.4",
+  "description": "A comprehensive VS Code extension that brings GitHub Desktop's complete workflow experience: commit management, branch operations, sync, conflict resolution, stashes and multi-account support.",
+  "version": "1.8.0",
   "publisher": "BetaVersion",
   "icon": "media/icon.png",
   "repository": {
@@ -24,8 +24,7 @@
     "commit",
     "branch",
     "repository",
-    "multi-account",
-    "react"
+    "multi-account"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -33,46 +32,6 @@
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
-      {
-        "command": "githubDesktop.commit.reset",
-        "title": "Reset to Commit",
-        "category": "GitHub Desktop"
-      },
-      {
-        "command": "githubDesktop.commit.checkout",
-        "title": "Checkout Commit",
-        "category": "GitHub Desktop"
-      },
-      {
-        "command": "githubDesktop.commit.revert",
-        "title": "Revert Commit",
-        "category": "GitHub Desktop"
-      },
-      {
-        "command": "githubDesktop.commit.createBranch",
-        "title": "Create Branch from Commit",
-        "category": "GitHub Desktop"
-      },
-      {
-        "command": "githubDesktop.commit.createTag",
-        "title": "Create Tag",
-        "category": "GitHub Desktop"
-      },
-      {
-        "command": "githubDesktop.commit.cherryPick",
-        "title": "Cherry-pick Commit",
-        "category": "GitHub Desktop"
-      },
-      {
-        "command": "githubDesktop.commit.copySha",
-        "title": "Copy SHA",
-        "category": "GitHub Desktop"
-      },
-      {
-        "command": "githubDesktop.commit.viewOnGitHub",
-        "title": "View on GitHub",
-        "category": "GitHub Desktop"
-      },
       {
         "command": "githubDesktop.signIn",
         "title": "GitHub Desktop: Sign In",
@@ -206,44 +165,29 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile && npm run build-webview",
+    "vscode:prepublish": "npm run compile",
     "compile": "webpack --mode production",
-    "build-webview": "vite build --config vite.webview.config.ts",
     "watch": "webpack --mode development --watch",
-    "watch-webview": "vite build --config vite.webview.config.ts --watch",
-    "dev-webview": "vite dev --config vite.webview.config.ts",
     "package": "vsce package --no-dependencies --allow-missing-repository --allow-package-secrets github",
     "test": "npm run compile && node ./out/test/runTest.js",
     "format": "prettier --write \"src/**/*.ts\""
   },
   "devDependencies": {
     "@types/node": "18.x",
-    "@types/react": "^19.1.13",
-    "@types/react-dom": "^19.1.9",
     "@types/vscode": "^1.84.0",
-    "@vitejs/plugin-react": "^5.0.3",
     "@vscode/vsce": "^3.6.0",
     "rimraf": "^5.0.5",
     "ts-loader": "^9.5.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3",
-    "vite": "^7.1.6",
     "webpack": "^5.101.3",
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
-    "@emotion/react": "^11.14.0",
-    "@emotion/styled": "^11.14.1",
-    "@mui/icons-material": "^7.3.2",
-    "@mui/material": "^7.3.2",
-    "@octokit/auth-oauth-device": "^4.0.3",
     "@octokit/rest": "^20.0.2",
-    "@tanstack/react-query": "^5.89.0",
-    "axios": "^1.12.2",
-    "dayjs": "^1.11.18",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
     "simple-git": "^3.21.0"
+  },
+  "volta": {
+    "node": "22.23.2"
   }
 }
-
